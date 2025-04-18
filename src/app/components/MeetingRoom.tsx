@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import SimplePeer from "simple-peer";
+import { SignalData, ChatData } from "@/lib/socket";
 
 interface ChatMessage {
 	message: string;
@@ -50,7 +51,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
 				newSocket.on("connect", () => {
 					console.log("Connected to Socket.IO server");
-					localStorage.setItem("userId", newSocket.id);
+					localStorage.setItem("userId", newSocket.id || '');
 					newSocket.emit("join-room", roomId);
 				});
 
@@ -126,7 +127,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 			setPeers((prev) => ({ ...prev, [userId]: peer }));
 		});
 
-		socket.on("signal", ({ from, signal, type }) => {
+		socket.on("signal", ({ from, signal, type }: SignalData) => {
 			console.log("Received signal:", type, "from:", from);
 
 			if (type === "offer") {
@@ -155,19 +156,19 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
 				peer.on("error", (err) => console.error("Peer error:", err));
 
-				peer.signal(signal);
+peer.signal(signal as string);
 				setPeers((prev) => ({ ...prev, [from]: peer }));
 			} else if (type === "answer") {
 				console.log("Processing answer from:", from);
 				const peer = peers[from];
 				if (peer) {
-					peer.signal(signal);
+peer.signal(signal as SignalData);
 				}
 			}
 		});
 
-		socket.on("user-disconnected", (userId) => {
-			console.log("User disconnected:", userId);
+		socket.on("user-disconnected", ({ userId, clientCount }) => {
+			console.log("User disconnected:", userId, "Total clients:", clientCount);
 			if (peers[userId]) {
 				peers[userId].destroy();
 				setPeers((prev) => {
@@ -175,16 +176,31 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 					delete newPeers[userId];
 					return newPeers;
 				});
-				setParticipantCount((prev) => Math.max(1, prev - 1));
 			}
+			setParticipantCount(clientCount);
 			if (remoteVideoRef.current && Object.keys(peers).length === 0) {
 				remoteVideoRef.current.srcObject = null;
 			}
 		});
 
-		socket.on("chat", ({ message, sender }) => {
-			setChatMessages((prev) => [...prev, { message, sender }]);
+		socket.on("peer-disconnected", (userId) => {
+			console.log("Peer disconnected:", userId);
+			if (peers[userId]) {
+				peers[userId].destroy();
+				setPeers((prev) => {
+					const newPeers = { ...prev };
+					delete newPeers[userId];
+					return newPeers;
+				});
+			}
 		});
+
+		socket.on(
+			"chat",
+			({ message, sender }: { message: string; sender: string }) => {
+				setChatMessages((prev) => [...prev, { message, sender }]);
+			}
+		);
 
 		return () => {
 			socket.off("user-connected");
@@ -200,7 +216,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 			roomId,
 			message: messageInput,
 			sender: socket.id,
-		});
+		} as ChatData);
 		setMessageInput("");
 	};
 
