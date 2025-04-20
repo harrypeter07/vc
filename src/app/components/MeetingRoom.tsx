@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import SimplePeer from "simple-peer";
 import { SignalData, ChatData } from "@/lib/socket";
+import { useRouter } from "next/navigation";
+import VideoPlayer from "./VideoPlayer";
+import ChatPanel from "./ChatPanel";
+import Controls from "./Controls";
 
 interface ChatMessage {
 	message: string;
@@ -24,6 +28,9 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 	const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 	const [messageInput, setMessageInput] = useState("");
 	const [participantCount, setParticipantCount] = useState(1);
+	const [error, setError] = useState<string | null>(null);
+	const [isChatOpen, setIsChatOpen] = useState(false);
+	const router = useRouter();
 
 	const localVideoRef = useRef<HTMLVideoElement>(null);
 	const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -34,25 +41,39 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 			try {
 				// If socket already exists, don't create a new one
 				if (socketRef.current) {
+					console.log("Socket already exists, reusing connection");
 					return;
 				}
 
+				console.log("Initializing new socket connection...");
 				await fetch("/api/socketio");
-				const newSocket = io("http://localhost:3001", {
-					path: "/api/socketio",
-					transports: ["websocket"],
-					reconnection: true,
-					reconnectionAttempts: 3,
-					reconnectionDelay: 1000,
-					query: {
-						userId: localStorage.getItem("userId") || Date.now().toString(),
-					},
-				});
+				const newSocket = io(
+					`http://localhost:${process.env.NEXT_PUBLIC_SOCKET_PORT || 3001}`,
+					{
+						path: "/api/socketio",
+						transports: ["websocket"],
+						reconnection: true,
+						reconnectionAttempts: 3,
+						reconnectionDelay: 1000,
+						query: {
+							userId: localStorage.getItem("userId") || Date.now().toString(),
+						},
+					}
+				);
 
 				newSocket.on("connect", () => {
-					console.log("Connected to Socket.IO server");
-					localStorage.setItem("userId", newSocket.id || '');
+					console.log("Connected to Socket.IO server with ID:", newSocket.id);
+					localStorage.setItem("userId", newSocket.id || "");
 					newSocket.emit("join-room", roomId);
+				});
+
+				newSocket.on("room-full", ({ message }) => {
+					console.log("Room is full:", message);
+					setError(message);
+					// Redirect to home page after 3 seconds
+					setTimeout(() => {
+						router.push("/");
+					}, 3000);
 				});
 
 				newSocket.on("connect_error", (error) => {
@@ -95,39 +116,98 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 	useEffect(() => {
 		if (!socket || !stream) return;
 
-		socket.on("user-connected", ({ userId, clientCount }) => {
+		console.log("Setting up socket event listeners...");
+
+		const handleUserConnected = ({
+			userId,
+			clientCount,
+		}: {
+			userId: string;
+			clientCount: number;
+		}) => {
 			console.log("New user connected:", userId, "Total clients:", clientCount);
 			setParticipantCount(clientCount);
 
-			const peer = new SimplePeer({
-				initiator: true,
-				stream,
-				trickle: false,
-			});
-
-			peer.on("signal", (data) => {
-				console.log("Sending offer to:", userId);
-				socket.emit("signal", {
-					to: userId,
-					from: socket.id,
-					signal: data,
-					type: "offer",
+			// Only create a new peer connection if this is a new user
+			if (userId !== socket.id && !peers[userId]) {
+				const peer = new SimplePeer({
+					initiator: true,
+					stream,
+					trickle: false,
 				});
-			});
 
-			peer.on("stream", (remoteStream) => {
-				console.log("Received stream from:", userId);
-				if (remoteVideoRef.current) {
-					remoteVideoRef.current.srcObject = remoteStream;
+				peer.on("signal", (data) => {
+					console.log("Sending offer to:", userId);
+					socket.emit("signal", {
+						to: userId,
+						from: socket.id,
+						signal: data,
+						type: "offer",
+					});
+				});
+
+				peer.on("stream", (remoteStream) => {
+					console.log("Received stream from:", userId);
+					if (remoteVideoRef.current) {
+						remoteVideoRef.current.srcObject = remoteStream;
+					}
+				});
+
+				peer.on("error", (err) => console.error("Peer error:", err));
+
+				setPeers((prev) => ({ ...prev, [userId]: peer }));
+			}
+		};
+
+		const handleExistingPeers = ({
+			peers: existingPeers,
+			clientCount,
+		}: {
+			peers: string[];
+			clientCount: number;
+		}) => {
+			console.log(
+				"Received existing peers:",
+				existingPeers,
+				"Total clients:",
+				clientCount
+			);
+			setParticipantCount(clientCount);
+
+			// Create peer connections for each existing peer
+			existingPeers.forEach((peerId) => {
+				if (!peers[peerId]) {
+					const peer = new SimplePeer({
+						initiator: false,
+						stream,
+						trickle: false,
+					});
+
+					peer.on("signal", (data) => {
+						console.log("Sending answer to:", peerId);
+						socket.emit("signal", {
+							to: peerId,
+							from: socket.id,
+							signal: data,
+							type: "answer",
+						});
+					});
+
+					peer.on("stream", (remoteStream) => {
+						console.log("Received stream from existing peer:", peerId);
+						if (remoteVideoRef.current) {
+							remoteVideoRef.current.srcObject = remoteStream;
+						}
+					});
+
+					peer.on("error", (err) => console.error("Peer error:", err));
+
+					setPeers((prev) => ({ ...prev, [peerId]: peer }));
 				}
 			});
+		};
 
-			peer.on("error", (err) => console.error("Peer error:", err));
-
-			setPeers((prev) => ({ ...prev, [userId]: peer }));
-		});
-
-		socket.on("signal", ({ from, signal, type }: SignalData) => {
+		const handleSignal = ({ from, signal, type }: SignalData) => {
 			console.log("Received signal:", type, "from:", from);
 
 			if (type === "offer") {
@@ -156,18 +236,24 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
 				peer.on("error", (err) => console.error("Peer error:", err));
 
-peer.signal(signal as string);
+				peer.signal(signal as string);
 				setPeers((prev) => ({ ...prev, [from]: peer }));
 			} else if (type === "answer") {
 				console.log("Processing answer from:", from);
 				const peer = peers[from];
 				if (peer) {
-peer.signal(signal as SignalData);
+					peer.signal(signal as string);
 				}
 			}
-		});
+		};
 
-		socket.on("user-disconnected", ({ userId, clientCount }) => {
+		const handleUserDisconnected = ({
+			userId,
+			clientCount,
+		}: {
+			userId: string;
+			clientCount: number;
+		}) => {
 			console.log("User disconnected:", userId, "Total clients:", clientCount);
 			if (peers[userId]) {
 				peers[userId].destroy();
@@ -181,115 +267,124 @@ peer.signal(signal as SignalData);
 			if (remoteVideoRef.current && Object.keys(peers).length === 0) {
 				remoteVideoRef.current.srcObject = null;
 			}
-		});
+		};
 
-		socket.on("peer-disconnected", (userId) => {
-			console.log("Peer disconnected:", userId);
-			if (peers[userId]) {
-				peers[userId].destroy();
-				setPeers((prev) => {
-					const newPeers = { ...prev };
-					delete newPeers[userId];
-					return newPeers;
-				});
-			}
-		});
-
-		socket.on(
-			"chat",
-			({ message, sender }: { message: string; sender: string }) => {
+		const handleChat = ({
+			message,
+			sender,
+		}: {
+			message: string;
+			sender: string;
+		}) => {
+			console.log("Received chat message:", message, "from:", sender);
+			// Only add message if it's from someone else or it's our first time seeing our own message
+			if (
+				sender !== socket.id ||
+				!chatMessages.some(
+					(msg) => msg.message === message && msg.sender === sender
+				)
+			) {
 				setChatMessages((prev) => [...prev, { message, sender }]);
 			}
-		);
+		};
+
+		socket.on("user-connected", handleUserConnected);
+		socket.on("existing-peers", handleExistingPeers);
+		socket.on("signal", handleSignal);
+		socket.on("user-disconnected", handleUserDisconnected);
+		socket.on("chat", handleChat);
 
 		return () => {
-			socket.off("user-connected");
-			socket.off("signal");
-			socket.off("user-disconnected");
+			console.log("Cleaning up socket event listeners...");
+			socket.off("user-connected", handleUserConnected);
+			socket.off("existing-peers", handleExistingPeers);
+			socket.off("signal", handleSignal);
+			socket.off("user-disconnected", handleUserDisconnected);
+			socket.off("chat", handleChat);
 		};
-	}, [socket, stream, roomId, peers]);
+	}, [socket, stream, roomId, peers, chatMessages]);
 
 	const sendMessage = () => {
 		if (!socket || !messageInput.trim()) return;
 
-		socket.emit("chat", {
+		console.log("Sending chat message:", messageInput.trim());
+		const chatData: ChatData = {
 			roomId,
-			message: messageInput,
-			sender: socket.id,
-		} as ChatData);
+			message: messageInput.trim(),
+			sender: socket.id || "", // Add fallback for undefined
+		};
+		socket.emit("chat", chatData);
 		setMessageInput("");
 	};
 
+	const toggleChat = () => {
+		setIsChatOpen(!isChatOpen);
+	};
+
+	if (error) {
+		return (
+			<div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
+				<div className="bg-white p-6 rounded-lg shadow-xl">
+					<h2 className="text-xl font-semibold text-red-600 mb-4">Error</h2>
+					<p className="text-gray-700 mb-4">{error}</p>
+					<p className="text-gray-500">Redirecting to home page...</p>
+				</div>
+			</div>
+		);
+	}
+
 	return (
-		<div className="flex flex-col md:flex-row h-screen p-4 gap-4">
-			<div className="flex-1 flex flex-col gap-4">
-				<div className="bg-white p-4 rounded-lg shadow-sm">
-					<h1 className="text-2xl font-semibold mb-2">Room: {roomId}</h1>
-					<p className="text-gray-600">Participants: {participantCount}</p>
-				</div>
-				<div className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden">
-					<video
-						ref={localVideoRef}
-						autoPlay
-						playsInline
-						muted
-						className="w-full h-full object-cover"
-					/>
-					<div className="absolute bottom-2 left-2 text-white text-sm bg-black/50 px-2 py-1 rounded">
-						You
-					</div>
-				</div>
-				<div className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden">
-					<video
-						ref={remoteVideoRef}
-						autoPlay
-						playsInline
-						className="w-full h-full object-cover"
-					/>
-					<div className="absolute bottom-2 left-2 text-white text-sm bg-black/50 px-2 py-1 rounded">
-						Remote
-					</div>
+		<div className="relative h-screen bg-gray-900">
+			{/* Meeting Info Bar */}
+			<div className="absolute top-0 left-0 right-0 h-16 bg-gray-800 flex items-center px-6 z-10">
+				<div className="flex items-center space-x-4">
+					<h1 className="text-white font-medium">Room: {roomId}</h1>
+					<span className="text-gray-400">|</span>
+					<p className="text-gray-300">Participants: {participantCount}/2</p>
 				</div>
 			</div>
 
-			<div className="w-full md:w-80 flex flex-col bg-white rounded-lg shadow-sm p-4">
-				<div className="flex-1 overflow-y-auto mb-4">
-					{chatMessages.map((msg, index) => (
-						<div
-							key={index}
-							className={`mb-2 ${
-								msg.sender === socket?.id ? "text-right" : "text-left"
-							}`}
-						>
-							<div
-								className={`inline-block px-3 py-2 rounded-lg ${
-									msg.sender === socket?.id
-										? "bg-blue-500 text-white"
-										: "bg-gray-100"
-								}`}
-							>
-								{msg.message}
-							</div>
+			{/* Main Content */}
+			<div className="h-full pt-16 pb-16 flex">
+				{/* Video Grid */}
+				<div
+					className={`flex-1 p-4 ${
+						isChatOpen ? "pr-[400px]" : ""
+					} transition-all duration-300`}
+				>
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
+						<div className="relative">
+							<VideoPlayer
+								videoRef={localVideoRef}
+								isMuted={true}
+								isLocal={true}
+								label="You"
+							/>
 						</div>
-					))}
+						{Object.keys(peers).length > 0 && (
+							<div className="relative">
+								<VideoPlayer videoRef={remoteVideoRef} label="Remote User" />
+							</div>
+						)}
+					</div>
 				</div>
-				<div className="flex gap-2">
-					<input
-						type="text"
-						value={messageInput}
-						onChange={(e) => setMessageInput(e.target.value)}
-						onKeyPress={(e) => e.key === "Enter" && sendMessage()}
-						placeholder="Type a message..."
-						className="flex-1 px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500"
-					/>
-					<button
-						onClick={sendMessage}
-						className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-					>
-						Send
-					</button>
+
+				{/* Chat Panel */}
+				<div
+					className={`fixed right-0 top-16 bottom-16 w-[400px] transform transition-transform duration-300 ${
+						isChatOpen ? "translate-x-0" : "translate-x-full"
+					}`}
+				>
+					<ChatPanel messages={chatMessages} socket={socket} roomId={roomId} />
 				</div>
 			</div>
+
+			{/* Controls */}
+			<Controls
+				stream={stream}
+				onToggleChat={toggleChat}
+				isChatOpen={isChatOpen}
+			/>
 		</div>
 	);
 }
