@@ -1,449 +1,358 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import SimplePeer from "simple-peer";
-import { SignalData, ChatData } from "@/lib/socket";
-import { useRouter } from "next/navigation";
 import VideoPlayer from "./VideoPlayer";
 import ChatPanel from "./ChatPanel";
 import Controls from "./Controls";
 
 interface ChatMessage {
-  message: string;
-  sender: string;
+	message: string;
+	sender: string;
 }
 
 interface PeerData {
-  peer: SimplePeer.Instance;
-  stream: MediaStream | null;
+	peer: SimplePeer.Instance;
+	stream: MediaStream | undefined;
 }
 
 interface MeetingRoomProps {
-  roomId: string;
-  email: string;
-  password: string;
+	roomId: string;
+	email: string;
+	password: string;
 }
 
-export default function MeetingRoom({ roomId, email, password }: MeetingRoomProps) {
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const socketRef = useRef<Socket | null>(null);
-  const [peers, setPeers] = useState<{ [key: string]: PeerData }>({});
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [participantCount, setParticipantCount] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const router = useRouter();
+export default function MeetingRoom({
+	roomId,
+	email,
+	password,
+}: MeetingRoomProps) {
+	const [socket, setSocket] = useState<Socket | null>(null);
+	const socketRef = useRef<Socket | null>(null);
+	const [isConnecting, setIsConnecting] = useState(false);
+	const [peers, setPeers] = useState<{ [key: string]: PeerData }>({});
+	const [stream, setStream] = useState<MediaStream | null>(null);
+	const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+	const [participantCount, setParticipantCount] = useState(1);
+	const [error, setError] = useState<string | null>(null);
+	const [isChatOpen, setIsChatOpen] = useState(false);
 
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
+	const localVideoRef = useRef<HTMLVideoElement | null>(null);
+	const peersRef = useRef<{ [key: string]: PeerData }>({});
 
-  useEffect(() => {
-    let isMounted = true;
+	// Initialize media stream
+	useEffect(() => {
+		const initStream = async () => {
+			try {
+				const mediaStream = await navigator.mediaDevices.getUserMedia({
+					video: {
+						width: { ideal: 1280 },
+						height: { ideal: 720 },
+						facingMode: "user",
+					},
+					audio: true,
+				});
 
-    const socketInit = async () => {
-      try {
-        if (socketRef.current) {
-          console.log("Socket already exists, reusing connection");
-          return;
-        }
+				// Enable all tracks explicitly
+				mediaStream.getTracks().forEach((track) => {
+					track.enabled = true;
+					console.log(`Track enabled: ${track.kind}`, track.enabled);
+				});
 
-        console.log("Initializing new socket connection...");
-        await fetch("/api/socketio");
-        const newSocket = io(`http://localhost:${process.env.NEXT_PUBLIC_SOCKET_PORT || 3001}`, {
-          path: "/api/socketio",
-          transports: ["websocket"],
-          reconnection: false, // Disable reconnection to prevent duplicates
-          query: {
-            userId: Date.now().toString(), // Use fresh userId to avoid reconnection issues
-          },
-        });
+				// Set stream to state
+				setStream(mediaStream);
 
-        socketRef.current = newSocket;
-        if (isMounted) {
-          setSocket(newSocket);
-        }
+				// Directly set stream to local video element
+				if (localVideoRef.current) {
+					console.log("Attaching stream to local video element");
 
-        newSocket.on("connect", () => {
-          console.log("Connected to Socket.IO server with ID:", newSocket.id);
-          newSocket.emit("join-room", { roomId, email, password });
-        });
+					// Remove any existing stream first
+					if (localVideoRef.current.srcObject) {
+						localVideoRef.current.srcObject = null;
+					}
 
-        newSocket.on("join-error", ({ message }) => {
-          console.log("Join error:", message);
-          if (isMounted) {
-            setError(message);
-            setTimeout(() => {
-              router.push("/");
-            }, 3000);
-          }
-        });
+					// Wait a bit before setting new stream
+					await new Promise((resolve) => setTimeout(resolve, 100));
 
-        newSocket.on("room-full", ({ message }) => {
-          console.log("Room is full:", message);
-          if (isMounted) {
-            setError(message);
-            setTimeout(() => {
-              router.push("/");
-            }, 3000);
-          }
-        });
+					localVideoRef.current.srcObject = mediaStream;
 
-        newSocket.on("connect_error", (error) => {
-          console.error("Socket connection error:", error);
-          if (isMounted) {
-            setError("Failed to connect to the server. Please try again.");
-          }
-        });
-      } catch (error) {
-        console.error("Failed to initialize socket:", error);
-        if (isMounted) {
-          setError("Failed to initialize connection. Please try again.");
-        }
-      }
-    };
+					// Handle loadedmetadata event
+					const handleLoadedMetadata = async () => {
+						try {
+							// Only attempt to play if video is paused
+							if (localVideoRef.current?.paused) {
+								await localVideoRef.current.play();
+								console.log("Local video playing after metadata loaded");
+							}
+						} catch (err) {
+							console.error("Error playing local video:", err);
+						}
+					};
 
-    socketInit();
+					// Add event listener for loadedmetadata
+					localVideoRef.current.addEventListener(
+						"loadedmetadata",
+						handleLoadedMetadata
+					);
 
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
-      .then((mediaStream) => {
-        if (isMounted) {
-          setStream(mediaStream);
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = mediaStream;
-          }
-        }
-      })
-      .catch((err) => {
-        console.error("Error accessing media devices:", err);
-        if (isMounted) {
-          setError("Failed to access camera or microphone. Please check permissions.");
-        }
-      });
+					// Cleanup function to remove event listener
+					return () => {
+						localVideoRef.current?.removeEventListener(
+							"loadedmetadata",
+							handleLoadedMetadata
+						);
+					};
+				} else {
+					console.error("Local video element not found");
+				}
+			} catch (err) {
+				console.error("Failed to get media stream:", err);
+				setError("Failed to access camera and microphone");
+			}
+		};
 
-    return () => {
-      isMounted = false;
-      console.log("Cleaning up MeetingRoom...");
-      // Clean up Socket.IO
-      if (socketRef.current) {
-        socketRef.current.emit("leave-room", { roomId });
-        socketRef.current.removeAllListeners();
-        socketRef.current.disconnect();
-        socketRef.current = null;
-        setSocket(null);
-        console.log("Socket disconnected and cleaned up");
-      }
+		initStream();
 
-      // Clean up media stream
-      if (stream) {
-        stream.getTracks().forEach((track) => {
-          track.stop();
-          track.enabled = false;
-        });
-        setStream(null);
-        console.log("Media stream stopped");
-      }
+		return () => {
+			if (stream) {
+				stream.getTracks().forEach((track) => {
+					track.stop();
+					console.log(`Track stopped: ${track.kind}`);
+				});
+			}
+			if (localVideoRef.current) {
+				localVideoRef.current.srcObject = null;
+			}
+		};
+	}, []); // Empty dependency array as we only want this to run once
 
-      // Clean up WebRTC peers
-      Object.values(peers).forEach(({ peer }) => {
-        peer.destroy();
-      });
-      setPeers({});
-      console.log("WebRTC peers destroyed");
+	// Initialize socket connection
+	useEffect(() => {
+		if (!stream || isConnecting) return;
 
-      // Clear video refs
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = null;
-      }
-      Object.keys(remoteVideoRefs.current).forEach((key) => {
-        if (remoteVideoRefs.current[key]) {
-          remoteVideoRefs.current[key]!.srcObject = null;
-        }
-      });
-      remoteVideoRefs.current = {};
-      console.log("Video references cleared");
+		const initSocket = async () => {
+			try {
+				setIsConnecting(true);
+				await fetch("/api/socketio");
 
-      // Clear local storage
-      localStorage.removeItem("userId");
-      console.log("Local storage cleared");
-    };
-  }, [roomId, email, password]);
+				const newSocket = io(
+					`http://localhost:${process.env.NEXT_PUBLIC_SOCKET_PORT || 3001}`,
+					{
+						path: "/api/socketio",
+						transports: ["websocket"],
+						autoConnect: false,
+						query: { email, roomId },
+					}
+				);
 
-  useEffect(() => {
-    if (!socket || !stream) return;
+				socketRef.current = newSocket;
+				setSocket(newSocket);
 
-    console.log("Setting up socket event listeners...");
+				newSocket.on("connect", () => {
+					console.log("Socket connected:", newSocket.id);
+					newSocket.emit("join-room", { roomId, email, password });
+				});
 
-    const handleUserConnected = ({
-      userId,
-      clientCount,
-    }: {
-      userId: string;
-      clientCount: number;
-    }) => {
-      console.log("New user connected:", userId, "Total clients:", clientCount);
-      setParticipantCount(clientCount);
+				newSocket.on("user-connected", ({ userId, clientCount }) => {
+					console.log("User connected:", userId);
+					setParticipantCount(clientCount);
 
-      if (userId !== socket.id && !peers[userId]) {
-        const peer = new SimplePeer({
-          initiator: true,
-          stream,
-          trickle: false,
-          config: {
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-          },
-        });
+					if (userId !== newSocket.id && stream) {
+						const peer = new SimplePeer({
+							initiator: true,
+							stream,
+							trickle: false,
+						});
 
-        peer.on("signal", (data) => {
-          console.log("Sending offer to:", userId);
-          socket.emit("signal", {
-            to: userId,
-            from: socket.id,
-            signal: data,
-            type: "offer",
-          });
-        });
+						peer.on("signal", (data) => {
+							newSocket.emit("signal", {
+								to: userId,
+								from: newSocket.id,
+								signal: data,
+								type: "offer",
+							});
+						});
 
-        peer.on("stream", (remoteStream) => {
-          console.log("Received stream from:", userId);
-          setPeers((prev) => ({
-            ...prev,
-            [userId]: { ...prev[userId], stream: remoteStream },
-          }));
-        });
+						peer.on("stream", (remoteStream) => {
+							setPeers((prev) => ({
+								...prev,
+								[userId]: { ...prev[userId], stream: remoteStream },
+							}));
+						});
 
-        peer.on("error", (err) => console.error("Peer error:", err));
+						peersRef.current[userId] = { peer, stream: undefined };
+						setPeers((prev) => ({
+							...prev,
+							[userId]: { peer, stream: undefined },
+						}));
+					}
+				});
 
-        setPeers((prev) => ({
-          ...prev,
-          [userId]: { peer, stream: null },
-        }));
-      }
-    };
+				newSocket.on("signal", ({ from, signal, type }) => {
+					if (type === "offer" && stream) {
+						const peer = new SimplePeer({
+							initiator: false,
+							stream,
+							trickle: false,
+						});
 
-    const handleExistingPeers = ({
-      peers: existingPeers,
-      clientCount,
-    }: {
-      peers: string[];
-      clientCount: number;
-    }) => {
-      console.log(
-        "Received existing peers:",
-        existingPeers,
-        "Total clients:",
-        clientCount
-      );
-      setParticipantCount(clientCount);
+						peer.on("signal", (data) => {
+							newSocket.emit("signal", {
+								to: from,
+								from: newSocket.id,
+								signal: data,
+								type: "answer",
+							});
+						});
 
-      existingPeers.forEach((peerId) => {
-        if (!peers[peerId]) {
-          const peer = new SimplePeer({
-            initiator: false,
-            stream,
-            trickle: false,
-            config: {
-              iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-            },
-          });
+						peer.on("stream", (remoteStream) => {
+							setPeers((prev) => ({
+								...prev,
+								[from]: { ...prev[from], stream: remoteStream },
+							}));
+						});
 
-          peer.on("signal", (data) => {
-            console.log("Sending answer to:", peerId);
-            socket.emit("signal", {
-              to: peerId,
-              from: socket.id,
-              signal: data,
-              type: "answer",
-            });
-          });
+						peer.signal(signal);
+						peersRef.current[from] = { peer, stream: undefined };
+						setPeers((prev) => ({
+							...prev,
+							[from]: { peer, stream: undefined },
+						}));
+					} else if (type === "answer") {
+						peersRef.current[from]?.peer.signal(signal);
+					}
+				});
 
-          peer.on("stream", (remoteStream) => {
-            console.log("Received stream from existing peer:", peerId);
-            setPeers((prev) => ({
-              ...prev,
-              [peerId]: { ...prev[peerId], stream: remoteStream },
-            }));
-          });
+				newSocket.on("user-disconnected", ({ userId, clientCount }) => {
+					console.log("User disconnected:", userId);
+					setParticipantCount(clientCount);
 
-          peer.on("error", (err) => console.error("Peer error:", err));
+					if (peersRef.current[userId]) {
+						peersRef.current[userId].peer.destroy();
+						delete peersRef.current[userId];
+						setPeers((prev) => {
+							const newPeers = { ...prev };
+							delete newPeers[userId];
+							return newPeers;
+						});
+					}
+				});
 
-          setPeers((prev) => ({
-            ...prev,
-            [peerId]: { peer, stream: null },
-          }));
-        }
-      });
-    };
+				newSocket.on("chat", ({ message, sender }) => {
+					console.log("Received chat message:", message, "from:", sender);
+					setChatMessages((prev) => [...prev, { message, sender }]);
+				});
 
-    const handleSignal = ({ from, signal, type }: SignalData) => {
-      console.log("Received signal:", type, "from:", from);
+				newSocket.connect();
+			} catch (err) {
+				console.error("Socket initialization failed:", err);
+				setError("Failed to connect to the room");
+			} finally {
+				setIsConnecting(false);
+			}
+		};
 
-      if (type === "offer") {
-        const peer = new SimplePeer({
-          initiator: false,
-          stream,
-          trickle: false,
-          config: {
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-          },
-        });
+		initSocket();
 
-        peer.on("signal", (data) => {
-          console.log("Sending answer to:", from);
-          socket.emit("signal", {
-            to: from,
-            from: socket.id,
-            signal: data,
-            type: "answer",
-          });
-        });
+		return () => {
+			if (socketRef.current) {
+				socketRef.current.disconnect();
+			}
+			Object.values(peersRef.current).forEach(({ peer }) => peer.destroy());
+			peersRef.current = {};
+		};
+	}, [stream, roomId, email, password]);
 
-        peer.on("stream", (remoteStream) => {
-          console.log("Received stream from:", from);
-          setPeers((prev) => ({
-            ...prev,
-            [from]: { ...prev[from], stream: remoteStream },
-          }));
-        });
+	const toggleChat = () => {
+		setIsChatOpen(!isChatOpen);
+	};
 
-        peer.on("error", (err) => console.error("Peer error:", err));
+	if (error) {
+		return (
+			<div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
+				<div className="bg-white p-6 rounded-lg shadow-xl">
+					<h2 className="text-xl font-semibold text-red-600 mb-4">Error</h2>
+					<p className="text-gray-700 mb-4">{error}</p>
+					<p className="text-gray-500">Redirecting to home page...</p>
+				</div>
+			</div>
+		);
+	}
 
-        peer.signal(signal as string);
-        setPeers((prev) => ({
-          ...prev,
-          [from]: { peer, stream: null },
-        }));
-      } else if (type === "answer") {
-        console.log("Processing answer from:", from);
-        const peerData = peers[from];
-        if (peerData) {
-          peerData.peer.signal(signal as string);
-        }
-      }
-    };
+	return (
+		<div className="relative h-screen bg-gray-900">
+			<div className="absolute top-0 left-0 right-0 h-16 bg-gray-800 flex items-center px-6 z-10">
+				<div className="flex items-center space-x-4">
+					<h1 className="text-white font-medium">Room: {roomId}</h1>
+					<span className="text-gray-400">|</span>
+					<p className="text-gray-300">Participants: {participantCount}/2</p>
+				</div>
+			</div>
 
-    const handleUserDisconnected = ({
-      userId,
-      clientCount,
-    }: {
-      userId: string;
-      clientCount: number;
-    }) => {
-      console.log("User disconnected:", userId, "Total clients:", clientCount);
-      if (peers[userId]) {
-        peers[userId].peer.destroy();
-        setPeers((prev) => {
-          const newPeers = { ...prev };
-          delete newPeers[userId];
-          return newPeers;
-        });
-      }
-      setParticipantCount(clientCount);
-    };
+			<div className="h-full pt-16 pb-16 flex">
+				<div
+					className={`flex-1 p-4 ${
+						isChatOpen ? "pr-[400px]" : ""
+					} transition-all duration-300`}
+				>
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
+						<div className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]">
+							<div className="relative w-full h-full">
+								<video
+									ref={localVideoRef}
+									autoPlay
+									playsInline
+									muted
+									className="w-full h-full object-cover scale-x-[-1]"
+									style={{ minHeight: "300px", backgroundColor: "#1f2937" }}
+								/>
+								<div className="absolute bottom-4 left-4 bg-black/40 px-3 py-1 rounded-lg">
+									<span className="text-white text-sm font-medium">
+										You ({email})
+									</span>
+								</div>
+							</div>
+						</div>
+						{Object.entries(peers).map(([userId, { stream: remoteStream }]) => (
+							<div
+								key={userId}
+								className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]"
+							>
+								<VideoPlayer
+									videoRef={() => {
+										if (peersRef.current[userId]) {
+											const currentPeer = peersRef.current[userId].peer;
+											peersRef.current[userId] = {
+												peer: currentPeer,
+												stream: remoteStream,
+											};
+										}
+									}}
+									stream={remoteStream}
+									isMuted={false}
+									isLocal={false}
+									label={`Peer ${userId.slice(0, 8)}`}
+								/>
+							</div>
+						))}
+					</div>
+				</div>
 
-    const handleChat = ({
-      message,
-      sender,
-    }: {
-      message: string;
-      sender: string;
-    }) => {
-      console.log("Received chat message:", message, "from:", sender);
-      setChatMessages((prev) => {
-        if (prev.some((msg) => msg.message === message && msg.sender === sender)) {
-          return prev;
-        }
-        return [...prev, { message, sender }];
-      });
-    };
+				<div
+					className={`fixed right-0 top-16 bottom-16 w-[400px] transform transition-transform duration-300 ${
+						isChatOpen ? "translate-x-0" : "translate-x-full"
+					}`}
+				>
+					<ChatPanel messages={chatMessages} socket={socket} roomId={roomId} />
+				</div>
+			</div>
 
-    socket.on("user-connected", handleUserConnected);
-    socket.on("existing-peers", handleExistingPeers);
-    socket.on("signal", handleSignal);
-    socket.on("user-disconnected", handleUserDisconnected);
-    socket.on("chat", handleChat);
-
-    return () => {
-      console.log("Cleaning up socket event listeners...");
-      socket.off("user-connected", handleUserConnected);
-      socket.off("existing-peers", handleExistingPeers);
-      socket.off("signal", handleSignal);
-      socket.off("user-disconnected", handleUserDisconnected);
-      socket.off("chat", handleChat);
-    };
-  }, [socket, stream, roomId, peers]);
-
-  const toggleChat = () => {
-    setIsChatOpen(!isChatOpen);
-  };
-
-  if (error) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
-        <div className="bg-white p-6 rounded-lg shadow-xl">
-          <h2 className="text-xl font-semibold text-red-600 mb-4">Error</h2>
-          <p className="text-gray-700 mb-4">{error}</p>
-          <p className="text-gray-500">Redirecting to home page...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative h-screen bg-gray-900">
-      <div className="absolute top-0 left-0 right-0 h-16 bg-gray-800 flex items-center px-6 z-10">
-        <div className="flex items-center space-x-4">
-          <h1 className="text-white font-medium">Room: {roomId}</h1>
-          <span className="text-gray-400">|</span>
-          <p className="text-gray-300">Participants: {participantCount}/2</p>
-        </div>
-      </div>
-
-      <div className="h-full pt-16 pb-16 flex">
-        <div
-          className={`flex-1 p-4 ${
-            isChatOpen ? "pr-[400px]" : ""
-          } transition-all duration-300`}
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
-            <div className="relative">
-              <VideoPlayer
-                videoRef={localVideoRef}
-                stream={stream}
-                isMuted={true}
-                isLocal={true}
-                label="You"
-              />
-            </div>
-            {Object.entries(peers).map(([userId, { stream: remoteStream }]) => (
-              <div key={userId} className="relative">
-                <VideoPlayer
-                  videoRef={(el) => (remoteVideoRefs.current[userId] = el)}
-                  stream={remoteStream}
-                  label={`User ${userId.slice(0, 8)}`}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div
-          className={`fixed right-0 top-16 bottom-16 w-[400px] transform transition-transform duration-300 ${
-            isChatOpen ? "translate-x-0" : "translate-x-full"
-          }`}
-        >
-          <ChatPanel messages={chatMessages} socket={socket} roomId={roomId} />
-        </div>
-      </div>
-
-      <Controls
-        stream={stream}
-        onToggleChat={toggleChat}
-        isChatOpen={isChatOpen}
-      />
-    </div>
-  );
+			<Controls
+				stream={stream}
+				onToggleChat={toggleChat}
+				isChatOpen={isChatOpen}
+			/>
+		</div>
+	);
 }

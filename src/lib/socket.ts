@@ -2,16 +2,16 @@ import { Server as SocketIOServer } from "socket.io";
 import { createServer } from "http";
 
 export interface SignalData {
-  to?: string;
-  from: string;
-  signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
-  type: "offer" | "answer";
+	to?: string;
+	from: string;
+	signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
+	type: "offer" | "answer";
 }
 
 export interface ChatData {
-  roomId: string;
-  message: string;
-  sender: string;
+	roomId: string;
+	message: string;
+	sender: string;
 }
 
 // Store for email and password per room (in-memory for simplicity)
@@ -22,173 +22,225 @@ let io: SocketIOServer | null = null;
 let httpServer: ReturnType<typeof createServer> | null = null;
 
 export const getIO = () => {
-  if (io) {
-    return io;
-  }
+	if (io) {
+		return io;
+	}
 
-  if (!httpServer) {
-    httpServer = createServer();
-  }
+	if (!httpServer) {
+		httpServer = createServer();
+	}
 
-  io = new SocketIOServer(httpServer, {
-    path: "/api/socketio",
-    addTrailingSlash: false,
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"],
-    },
-    transports: ["websocket"],
-    connectionStateRecovery: {
-      maxDisconnectionDuration: 2 * 60 * 1000,
-      skipMiddlewares: true,
-    },
-  });
+	io = new SocketIOServer(httpServer, {
+		path: "/api/socketio",
+		addTrailingSlash: false,
+		cors: {
+			origin: "*",
+			methods: ["GET", "POST"],
+		},
+		transports: ["websocket"],
+		connectionStateRecovery: {
+			maxDisconnectionDuration: 2 * 60 * 1000,
+			skipMiddlewares: true,
+		},
+	});
 
-  io.on("connection", (socket) => {
-    console.log(`Client connected: ${socket.id}`);
+	io.on("connection", (socket) => {
+		console.log(`Client connected: ${socket.id}`);
 
-    socket.on("join-room", ({ roomId, email, password }: { roomId: string; email: string; password: string }) => {
-      console.log(`User ${socket.id} attempting to join room ${roomId} with email ${email}`);
+		// Get email and roomId from query params
+		const email = socket.handshake.query.email as string;
+		const roomId = socket.handshake.query.roomId as string;
 
-      // Initialize room credentials if not exists
-      if (!roomCredentials[roomId]) {
-        roomCredentials[roomId] = {};
-        roomUsers[roomId] = {};
-      }
+		// If email and roomId are provided in the connection, check for existing socket
+		if (email && roomId) {
+			const room = io!.sockets.adapter.rooms.get(roomId);
+			if (room) {
+				// Check if this email already has a socket in the room
+				const existingSocket = Array.from(room).find(
+					(socketId) => roomUsers[roomId]?.[socketId] === email
+				);
 
-      // Check for duplicate email in the room
-      if (Object.values(roomUsers[roomId]).includes(email)) {
-        console.log(`Duplicate email ${email} in room ${roomId}. Rejecting user ${socket.id}`);
-        socket.emit("join-error", {
-          message: "This email is already in use in the room.",
-        });
-        return;
-      }
+				if (existingSocket) {
+					console.log(
+						`Duplicate connection attempt from ${email} in room ${roomId}. Disconnecting new socket.`
+					);
+					socket.disconnect();
+					return;
+				}
+			}
+		}
 
-      // Validate credentials
-      if (roomCredentials[roomId][email] && roomCredentials[roomId][email] !== password) {
-        console.log(`Invalid password for email ${email} in room ${roomId}`);
-        socket.emit("join-error", {
-          message: "Invalid email or password.",
-        });
-        return;
-      }
+		socket.on(
+			"join-room",
+			({
+				roomId,
+				email,
+				password,
+			}: {
+				roomId: string;
+				email: string;
+				password: string;
+			}) => {
+				console.log(
+					`User ${socket.id} attempting to join room ${roomId} with email ${email}`
+				);
 
-      // Store credentials if new user
-      if (!roomCredentials[roomId][email]) {
-        roomCredentials[roomId][email] = password;
-      }
+				// Initialize room credentials if not exists
+				if (!roomCredentials[roomId]) {
+					roomCredentials[roomId] = {};
+					roomUsers[roomId] = {};
+				}
 
-      // Check if room is full (2 clients max)
-      const room = io!.sockets.adapter.rooms.get(roomId);
-      const roomSize = room ? room.size : 0;
+				// Check for duplicate email in the room
+				if (Object.values(roomUsers[roomId]).includes(email)) {
+					console.log(
+						`Duplicate email ${email} in room ${roomId}. Rejecting user ${socket.id}`
+					);
+					socket.emit("join-error", {
+						message: "This email is already in use in the room.",
+					});
+					return;
+				}
 
-      if (roomSize >= 2) {
-        console.log(`Room ${roomId} is full. Rejecting user ${socket.id}`);
-        socket.emit("room-full", {
-          message: "This room is full. Maximum 2 participants allowed.",
-        });
-        return;
-      }
+				// Validate credentials
+				if (
+					roomCredentials[roomId][email] &&
+					roomCredentials[roomId][email] !== password
+				) {
+					console.log(`Invalid password for email ${email} in room ${roomId}`);
+					socket.emit("join-error", {
+						message: "Invalid email or password.",
+					});
+					return;
+				}
 
-      socket.join(roomId);
-      roomUsers[roomId][socket.id] = email;
-      const roomClients = io!.sockets.adapter.rooms.get(roomId)?.size || 0;
-      console.log(`Room ${roomId} now has ${roomClients} clients`);
+				// Store credentials if new user
+				if (!roomCredentials[roomId][email]) {
+					roomCredentials[roomId][email] = password;
+				}
 
-      io!.in(roomId).emit("user-connected", {
-        userId: socket.id,
-        clientCount: roomClients,
-      });
+				// Check if room is full (2 clients max)
+				const room = io!.sockets.adapter.rooms.get(roomId);
+				const roomSize = room ? room.size : 0;
 
-      const roomSockets = Array.from(io!.sockets.adapter.rooms.get(roomId) || []);
-      const peers = roomSockets.filter((id) => id !== socket.id);
-      if (peers.length > 0) {
-        console.log(`Sending existing peers to new user ${socket.id}:`, peers);
-        socket.emit("existing-peers", {
-          peers,
-          clientCount: roomClients,
-        });
-      }
-    });
+				if (roomSize >= 2) {
+					console.log(`Room ${roomId} is full. Rejecting user ${socket.id}`);
+					socket.emit("room-full", {
+						message: "This room is full. Maximum 2 participants allowed.",
+					});
+					return;
+				}
 
-    socket.on("leave-room", ({ roomId }: { roomId: string }) => {
-      console.log(`User ${socket.id} leaving room ${roomId}`);
-      if (roomUsers[roomId] && roomUsers[roomId][socket.id]) {
-        delete roomUsers[roomId][socket.id];
-        console.log(`Removed user ${socket.id} from roomUsers for room ${roomId}`);
-      }
-      socket.leave(roomId);
-      const roomClients = io!.sockets.adapter.rooms.get(roomId)?.size || 0;
-      socket.to(roomId).emit("user-disconnected", {
-        userId: socket.id,
-        clientCount: roomClients,
-      });
-      // Clean up empty room
-      if (roomClients === 0) {
-        delete roomUsers[roomId];
-        delete roomCredentials[roomId];
-        console.log(`Cleaned up empty room ${roomId}`);
-      }
-    });
+				socket.join(roomId);
+				roomUsers[roomId][socket.id] = email;
+				const roomClients = io!.sockets.adapter.rooms.get(roomId)?.size || 0;
+				console.log(`Room ${roomId} now has ${roomClients} clients`);
 
-    socket.on("signal", ({ to, from, signal, type }: SignalData) => {
-      console.log(`Received ${type} signal from ${from} to ${to}`);
-      if (to && !io!.sockets.adapter.rooms.get(to)) {
-        console.log(`Target peer ${to} not found in any room`);
-        socket.emit("peer-disconnected", to);
-        return;
-      }
-      if (to) {
-        console.log(`Forwarding ${type} signal from ${from} to ${to}`);
-        io!.to(to).emit("signal", { from, signal, type });
-      }
-    });
+				io!.in(roomId).emit("user-connected", {
+					userId: socket.id,
+					clientCount: roomClients,
+				});
 
-    socket.on("chat", ({ roomId, message, sender }: ChatData) => {
-      console.log(
-        `Chat message received - Room: ${roomId}, Sender: ${sender}, Message: ${message}`
-      );
-      if (!message.trim()) {
-        console.log("Empty message, ignoring");
-        return;
-      }
+				const roomSockets = Array.from(
+					io!.sockets.adapter.rooms.get(roomId) || []
+				);
+				const peers = roomSockets.filter((id) => id !== socket.id);
+				if (peers.length > 0) {
+					console.log(
+						`Sending existing peers to new user ${socket.id}:`,
+						peers
+					);
+					socket.emit("existing-peers", {
+						peers,
+						clientCount: roomClients,
+					});
+				}
+			}
+		);
 
-      io!.in(roomId).emit("chat", {
-        message: message.trim(),
-        sender,
-      });
-      console.log(`Chat message broadcast to room ${roomId}`);
-    });
+		socket.on("leave-room", ({ roomId }: { roomId: string }) => {
+			console.log(`User ${socket.id} leaving room ${roomId}`);
+			if (roomUsers[roomId] && roomUsers[roomId][socket.id]) {
+				delete roomUsers[roomId][socket.id];
+				console.log(
+					`Removed user ${socket.id} from roomUsers for room ${roomId}`
+				);
+			}
+			socket.leave(roomId);
+			const roomClients = io!.sockets.adapter.rooms.get(roomId)?.size || 0;
+			socket.to(roomId).emit("user-disconnected", {
+				userId: socket.id,
+				clientCount: roomClients,
+			});
+			// Clean up empty room
+			if (roomClients === 0) {
+				delete roomUsers[roomId];
+				delete roomCredentials[roomId];
+				console.log(`Cleaned up empty room ${roomId}`);
+			}
+		});
 
-    socket.on("disconnect", () => {
-      console.log(`Client disconnecting: ${socket.id}`);
-      const rooms = Array.from(socket.rooms);
-      rooms.forEach((roomId) => {
-        if (roomUsers[roomId] && roomUsers[roomId][socket.id]) {
-          delete roomUsers[roomId][socket.id];
-          console.log(`Removed user ${socket.id} from roomUsers for room ${roomId}`);
-        }
-        const roomClients = io!.sockets.adapter.rooms.get(roomId)?.size || 0;
-        console.log(`Notifying room ${roomId} about disconnection of ${socket.id}`);
-        socket.to(roomId).emit("user-disconnected", {
-          userId: socket.id,
-          clientCount: Math.max(0, roomClients - 1),
-        });
-        // Clean up empty room
-        if (roomClients === 0) {
-          delete roomUsers[roomId];
-          delete roomCredentials[roomId];
-          console.log(`Cleaned up empty room ${roomId}`);
-        }
-      });
-    });
-  });
+		socket.on("signal", ({ to, from, signal, type }: SignalData) => {
+			console.log(`Received ${type} signal from ${from} to ${to}`);
+			if (to && !io!.sockets.adapter.rooms.get(to)) {
+				console.log(`Target peer ${to} not found in any room`);
+				socket.emit("peer-disconnected", to);
+				return;
+			}
+			if (to) {
+				console.log(`Forwarding ${type} signal from ${from} to ${to}`);
+				io!.to(to).emit("signal", { from, signal, type });
+			}
+		});
 
-  const PORT = process.env.SOCKET_PORT || 3001;
-  httpServer.listen(PORT, () => {
-    console.log(`Socket.IO server running on port ${PORT}`);
-  });
+		socket.on("chat", ({ roomId, message, sender }: ChatData) => {
+			console.log(
+				`Chat message received - Room: ${roomId}, Sender: ${sender}, Message: ${message}`
+			);
+			if (!message.trim()) {
+				console.log("Empty message, ignoring");
+				return;
+			}
 
-  return io;
+			io!.in(roomId).emit("chat", {
+				message: message.trim(),
+				sender,
+			});
+			console.log(`Chat message broadcast to room ${roomId}`);
+		});
+
+		socket.on("disconnect", () => {
+			console.log(`Client disconnecting: ${socket.id}`);
+			const rooms = Array.from(socket.rooms);
+			rooms.forEach((roomId) => {
+				if (roomUsers[roomId] && roomUsers[roomId][socket.id]) {
+					delete roomUsers[roomId][socket.id];
+					console.log(
+						`Removed user ${socket.id} from roomUsers for room ${roomId}`
+					);
+				}
+				const roomClients = io!.sockets.adapter.rooms.get(roomId)?.size || 0;
+				console.log(
+					`Notifying room ${roomId} about disconnection of ${socket.id}`
+				);
+				socket.to(roomId).emit("user-disconnected", {
+					userId: socket.id,
+					clientCount: Math.max(0, roomClients - 1),
+				});
+				// Clean up empty room
+				if (roomClients === 0) {
+					delete roomUsers[roomId];
+					delete roomCredentials[roomId];
+					console.log(`Cleaned up empty room ${roomId}`);
+				}
+			});
+		});
+	});
+
+	const PORT = process.env.SOCKET_PORT || 3001;
+	httpServer.listen(PORT, () => {
+		console.log(`Socket.IO server running on port ${PORT}`);
+	});
+
+	return io;
 };
