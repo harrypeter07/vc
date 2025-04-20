@@ -268,6 +268,42 @@ export default function MeetingRoom({
 		setIsChatOpen(!isChatOpen);
 	};
 
+	const toggleVideo = (enabled: boolean) => {
+		if (stream) {
+			stream.getVideoTracks().forEach((track) => {
+				track.enabled = enabled;
+			});
+
+			// Update all peer connections with the new track state
+			Object.values(peersRef.current).forEach(({ peer }) => {
+				if (peer) {
+					const videoSender = peer.streams[0]?.getVideoTracks()[0];
+					if (videoSender) {
+						videoSender.enabled = enabled;
+					}
+				}
+			});
+		}
+	};
+
+	const toggleAudio = (enabled: boolean) => {
+		if (stream) {
+			stream.getAudioTracks().forEach((track) => {
+				track.enabled = enabled;
+			});
+
+			// Update all peer connections with the new track state
+			Object.values(peersRef.current).forEach(({ peer }) => {
+				if (peer) {
+					const audioSender = peer.streams[0]?.getAudioTracks()[0];
+					if (audioSender) {
+						audioSender.enabled = enabled;
+					}
+				}
+			});
+		}
+	};
+
 	if (error) {
 		return (
 			<div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
@@ -352,6 +388,8 @@ export default function MeetingRoom({
 				stream={stream}
 				onToggleChat={toggleChat}
 				isChatOpen={isChatOpen}
+				onVideoToggle={toggleVideo}
+				onAudioToggle={toggleAudio}
 			/>
 		</div>
 	);
