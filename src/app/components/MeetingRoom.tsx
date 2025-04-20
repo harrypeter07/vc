@@ -136,15 +136,14 @@ export default function MeetingRoom({
 				setIsConnecting(true);
 				await fetch("/api/socketio");
 
-				const newSocket = io(
-					`http://localhost:${process.env.NEXT_PUBLIC_SOCKET_PORT || 3001}`,
-					{
-						path: "/api/socketio",
-						transports: ["websocket"],
-						autoConnect: false,
-						query: { email, roomId },
-					}
-				);
+				const socketUrl =
+					process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+				const newSocket = io(socketUrl, {
+					path: "/api/socketio",
+					transports: ["websocket"],
+					autoConnect: false,
+					query: { email, roomId },
+				});
 
 				socketRef.current = newSocket;
 				setSocket(newSocket);

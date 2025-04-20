@@ -1,4 +1,4 @@
-import { Server as SocketIOServer } from "socket.io";
+import { Server } from "socket.io";
 import { createServer } from "http";
 
 export interface SignalData {
@@ -18,8 +18,22 @@ export interface ChatData {
 const roomCredentials: { [roomId: string]: { [email: string]: string } } = {};
 const roomUsers: { [roomId: string]: { [socketId: string]: string } } = {};
 
-let io: SocketIOServer | null = null;
+let io: Server | null = null;
 let httpServer: ReturnType<typeof createServer> | null = null;
+
+export function getSocketIO() {
+	if (!io) {
+		io = new Server({
+			cors: {
+				origin: "*",
+				methods: ["GET", "POST"],
+				credentials: true,
+			},
+			transports: ["websocket"],
+		});
+	}
+	return io;
+}
 
 export const getIO = () => {
 	if (io) {
@@ -30,12 +44,13 @@ export const getIO = () => {
 		httpServer = createServer();
 	}
 
-	io = new SocketIOServer(httpServer, {
+	io = new Server(httpServer, {
 		path: "/api/socketio",
 		addTrailingSlash: false,
 		cors: {
 			origin: "*",
 			methods: ["GET", "POST"],
+			credentials: true,
 		},
 		transports: ["websocket"],
 		connectionStateRecovery: {
@@ -235,11 +250,6 @@ export const getIO = () => {
 				}
 			});
 		});
-	});
-
-	const PORT = process.env.SOCKET_PORT || 3001;
-	httpServer.listen(PORT, () => {
-		console.log(`Socket.IO server running on port ${PORT}`);
 	});
 
 	return io;
