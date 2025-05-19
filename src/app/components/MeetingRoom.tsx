@@ -7,6 +7,7 @@ import SimplePeer from "simple-peer";
 import VideoPlayer from "./VideoPlayer";
 import ChatPanel from "./ChatPanel";
 import Controls from "./Controls";
+import { useRouter } from "next/navigation";
 
 interface ChatMessage {
 	message: string;
@@ -61,6 +62,7 @@ export default function MeetingRoom({
 
 	const localVideoRef = useRef<HTMLVideoElement | null>(null);
 	const peersRef = useRef<{ [key: string]: PeerData }>({});
+	const router = useRouter();
 
 	// Initialize media stream
 	useEffect(() => {
@@ -286,8 +288,8 @@ export default function MeetingRoom({
 					);
 					setTimeout(() => {
 						setRoomFullMsg(null);
-						// Optionally, redirect or close the room here
-					}, 5000);
+						router.push("/");
+					}, 3000);
 				});
 
 				newSocket.connect();
@@ -308,7 +310,7 @@ export default function MeetingRoom({
 			Object.values(peersRef.current).forEach(({ peer }) => peer.destroy());
 			peersRef.current = {};
 		};
-	}, [stream, roomId, email, password]);
+	}, [stream, roomId, email, password, router]);
 
 	const toggleChat = () => {
 		setIsChatOpen(!isChatOpen);
