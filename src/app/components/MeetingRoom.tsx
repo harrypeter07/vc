@@ -29,7 +29,6 @@ export default function MeetingRoom({
 	email,
 	password,
 }: MeetingRoomProps) {
-
 	const [socket, setSocket] = useState<ReturnType<typeof io> | null>(null);
 	const socketRef = useRef<ReturnType<typeof io> | null>(null);
 	const [isConnecting, setIsConnecting] = useState(false);
@@ -138,7 +137,7 @@ export default function MeetingRoom({
 				setIsConnecting(true);
 
 				const newSocket = io("https://vc-production-bc1c.up.railway.app", {
-					path: "/api/socketio",
+					path: "/socketio",
 					transports: ["websocket"],
 					autoConnect: false,
 					query: { email, roomId },

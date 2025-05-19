@@ -31,7 +31,7 @@ export const getIO = () => {
 	}
 
 	io = new SocketIOServer(httpServer, {
-		path: "/api/socketio",
+		path: "/socketio",
 		addTrailingSlash: false,
 		cors: {
 			origin: "*",
