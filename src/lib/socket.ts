@@ -240,10 +240,5 @@ export const getIO = () => {
 		});
 	});
 
-	const PORT = process.env.SOCKET_PORT || 3001;
-	httpServer.listen(PORT, () => {
-		console.log(`Socket.IO server running on port ${PORT}`);
-	});
-
 	return io;
 };
