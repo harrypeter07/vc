@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react";
 
 interface ChatData {
@@ -13,7 +14,7 @@ interface ChatMessage {
 
 interface ChatPanelProps {
 	messages: ChatMessage[];
-	socket: ReturnType<typeof io> | null;
+	socket: any;
 	roomId: string;
 }
 
