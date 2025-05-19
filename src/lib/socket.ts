@@ -213,6 +213,8 @@ export const getIO = () => {
 			console.log(`Client disconnecting: ${socket.id}`);
 			const rooms = Array.from(socket.rooms);
 			rooms.forEach((roomId) => {
+				// Skip the socket's own room (its ID)
+				if (roomId === socket.id) return;
 				if (roomUsers[roomId] && roomUsers[roomId][socket.id]) {
 					delete roomUsers[roomId][socket.id];
 					console.log(
@@ -223,9 +225,10 @@ export const getIO = () => {
 				console.log(
 					`Notifying room ${roomId} about disconnection of ${socket.id}`
 				);
-				socket.to(roomId).emit("user-disconnected", {
+				// Notify other users in the room
+				io!.to(roomId).emit("user-disconnected", {
 					userId: socket.id,
-					clientCount: Math.max(0, roomClients - 1),
+					clientCount: Math.max(0, roomClients),
 				});
 				// Clean up empty room
 				if (roomClients === 0) {
