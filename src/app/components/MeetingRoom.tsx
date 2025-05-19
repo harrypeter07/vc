@@ -56,6 +56,7 @@ export default function MeetingRoom({
 	const [participantCount, setParticipantCount] = useState(1);
 	const [error, setError] = useState<string | null>(null);
 	const [isChatOpen, setIsChatOpen] = useState(false);
+	const [disconnectMsg, setDisconnectMsg] = useState<string | null>(null);
 
 	const localVideoRef = useRef<HTMLVideoElement | null>(null);
 	const peersRef = useRef<{ [key: string]: PeerData }>({});
@@ -268,6 +269,7 @@ export default function MeetingRoom({
 								delete newPeers[userId];
 								return newPeers;
 							});
+							setDisconnectMsg("Peer has left the room.");
 						}
 					}
 				);
@@ -424,6 +426,12 @@ export default function MeetingRoom({
 				onVideoToggle={toggleVideo}
 				onAudioToggle={toggleAudio}
 			/>
+
+			{disconnectMsg && (
+				<div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded shadow-lg z-50">
+					{disconnectMsg}
+				</div>
+			)}
 		</div>
 	);
 }
