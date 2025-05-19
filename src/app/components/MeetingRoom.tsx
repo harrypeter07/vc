@@ -57,6 +57,7 @@ export default function MeetingRoom({
 	const [error, setError] = useState<string | null>(null);
 	const [isChatOpen, setIsChatOpen] = useState(false);
 	const [disconnectMsg, setDisconnectMsg] = useState<string | null>(null);
+	const [roomFullMsg, setRoomFullMsg] = useState<string | null>(null);
 
 	const localVideoRef = useRef<HTMLVideoElement | null>(null);
 	const peersRef = useRef<{ [key: string]: PeerData }>({});
@@ -279,6 +280,16 @@ export default function MeetingRoom({
 					setChatMessages((prev) => [...prev, { message, sender }]);
 				});
 
+				newSocket.on("room-full", (data: { message: string }) => {
+					setRoomFullMsg(
+						data.message || "This room is full. Maximum 2 participants allowed."
+					);
+					setTimeout(() => {
+						setRoomFullMsg(null);
+						// Optionally, redirect or close the room here
+					}, 5000);
+				});
+
 				newSocket.connect();
 			} catch (err) {
 				console.error("Socket initialization failed:", err);
@@ -430,6 +441,12 @@ export default function MeetingRoom({
 			{disconnectMsg && (
 				<div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded shadow-lg z-50">
 					{disconnectMsg}
+				</div>
+			)}
+
+			{roomFullMsg && (
+				<div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-yellow-500 text-white px-4 py-2 rounded shadow-lg z-50">
+					{roomFullMsg}
 				</div>
 			)}
 		</div>
