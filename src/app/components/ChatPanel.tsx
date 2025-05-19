@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { ChatData } from "@/lib/socket";
+
+interface ChatData {
+	roomId: string;
+	message: string;
+	sender: string;
+}
 
 interface ChatMessage {
 	message: string;
@@ -8,7 +13,7 @@ interface ChatMessage {
 
 interface ChatPanelProps {
 	messages: ChatMessage[];
-	socket:ReturnType<typeof io> | null;
+	socket: ReturnType<typeof io> | null;
 	roomId: string;
 }
 

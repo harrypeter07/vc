@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { getIO } from "./socket";
 
 // Initialize the Socket.IO server
