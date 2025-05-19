@@ -6,7 +6,8 @@
 		"dev": "next dev --turbopack",
 		"build": "next build",
 		"start": "next start",
-		"server": "ts-node server.ts",
+		"build:server": "tsc",
+		"server": "npm run build:server && node dist/server.js",
 		"lint": "next lint"
 	},
 	"dependencies": {
