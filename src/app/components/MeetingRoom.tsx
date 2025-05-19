@@ -7,7 +7,7 @@ import SimplePeer from "simple-peer";
 import VideoPlayer from "./VideoPlayer";
 import ChatPanel from "./ChatPanel";
 import Controls from "./Controls";
-import type { SignalData, ChatData } from "@/lib/socket";
+
 interface ChatMessage {
 	message: string;
 	sender: string;
@@ -22,6 +22,24 @@ interface MeetingRoomProps {
 	roomId: string;
 	email: string;
 	password: string;
+}
+
+// Use environment variable for the Socket.IO server URL (set NEXT_PUBLIC_SOCKET_SERVER_URL in your .env file)
+const SOCKET_SERVER_URL =
+	process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "https://vc-i6e6.onrender.com";
+
+// Inline types from server/socket.ts for client-side use
+interface SignalData {
+	to?: string;
+	from: string;
+	signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
+	type: "offer" | "answer";
+}
+
+interface ChatData {
+	roomId: string;
+	message: string;
+	sender: string;
 }
 
 export default function MeetingRoom({
@@ -136,7 +154,7 @@ export default function MeetingRoom({
 			try {
 				setIsConnecting(true);
 
-				const newSocket = io("https://vc-production-bc1c.up.railway.app", {
+				const newSocket = io(SOCKET_SERVER_URL, {
 					path: "/socketio",
 					transports: ["websocket"],
 					autoConnect: false,
