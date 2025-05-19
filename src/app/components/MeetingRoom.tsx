@@ -134,17 +134,13 @@ export default function MeetingRoom({
 		const initSocket = async () => {
 			try {
 				setIsConnecting(true);
-				await fetch("/api/socketio");
 
-				const newSocket = io(
-					`http://localhost:${process.env.NEXT_PUBLIC_SOCKET_PORT || 3001}`,
-					{
-						path: "/api/socketio",
-						transports: ["websocket"],
-						autoConnect: false,
-						query: { email, roomId },
-					}
-				);
+				const newSocket = io("https://vc-production-bc1c.up.railway.app", {
+					path: "/api/socketio",
+					transports: ["websocket"],
+					autoConnect: false,
+					query: { email, roomId },
+				});
 
 				socketRef.current = newSocket;
 				setSocket(newSocket);
