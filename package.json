@@ -16,7 +16,8 @@
 		"react-dom": "^19.0.0",
 		"simple-peer": "^9.11.1",
 		"socket.io": "^4.8.1",
-		"socket.io-client": "^4.8.1"
+		"socket.io-client": "^4.8.1",
+		"ts-node": "^10.9.1"
 	},
 	"devDependencies": {
 		"@eslint/eslintrc": "^3",
