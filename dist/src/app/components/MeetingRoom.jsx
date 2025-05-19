@@ -1,4 +1,5 @@
 "use strict";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -6,7 +7,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.default = MeetingRoom;
 const react_1 = require("react");
-const socket_io_client_1 = require("socket.io-client");
+const socket_io_client_1 = __importDefault(require("socket.io-client"));
 const simple_peer_1 = __importDefault(require("simple-peer"));
 const VideoPlayer_1 = __importDefault(require("./VideoPlayer"));
 const ChatPanel_1 = __importDefault(require("./ChatPanel"));
@@ -103,7 +104,7 @@ function MeetingRoom({ roomId, email, password, }) {
         const initSocket = async () => {
             try {
                 setIsConnecting(true);
-                const newSocket = (0, socket_io_client_1.io)("https://vc-production-bc1c.up.railway.app", {
+                const newSocket = (0, socket_io_client_1.default)("https://vc-production-bc1c.up.railway.app", {
                     path: "/api/socketio",
                     transports: ["websocket"],
                     autoConnect: false,
@@ -115,7 +116,7 @@ function MeetingRoom({ roomId, email, password, }) {
                     console.log("Socket connected:", newSocket.id);
                     newSocket.emit("join-room", { roomId, email, password });
                 });
-                newSocket.on("user-connected", ({ userId, clientCount }) => {
+                newSocket.on("user-connected", ({ userId, clientCount, }) => {
                     console.log("User connected:", userId);
                     setParticipantCount(clientCount);
                     if (userId !== newSocket.id && stream) {
@@ -166,7 +167,7 @@ function MeetingRoom({ roomId, email, password, }) {
                         (_a = peersRef.current[from]) === null || _a === void 0 ? void 0 : _a.peer.signal(signal);
                     }
                 });
-                newSocket.on("user-disconnected", ({ userId, clientCount }) => {
+                newSocket.on("user-disconnected", ({ userId, clientCount, }) => {
                     console.log("User disconnected:", userId);
                     setParticipantCount(clientCount);
                     if (peersRef.current[userId]) {

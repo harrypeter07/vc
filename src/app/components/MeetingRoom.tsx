@@ -1,14 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
-import type { Socket } from "socket.io-client";
+import io from "socket.io-client";
 import SimplePeer from "simple-peer";
 import VideoPlayer from "./VideoPlayer";
 import ChatPanel from "./ChatPanel";
 import Controls from "./Controls";
 import type { SignalData, ChatData } from "@/lib/socket";
-
 interface ChatMessage {
 	message: string;
 	sender: string;
@@ -30,8 +29,9 @@ export default function MeetingRoom({
 	email,
 	password,
 }: MeetingRoomProps) {
-	const [socket, setSocket] = useState<Socket | null>(null);
-	const socketRef = useRef<Socket | null>(null);
+
+	const [socket, setSocket] = useState<ReturnType<typeof io> | null>(null);
+	const socketRef = useRef<ReturnType<typeof io> | null>(null);
 	const [isConnecting, setIsConnecting] = useState(false);
 	const [peers, setPeers] = useState<{ [key: string]: PeerData }>({});
 	const [stream, setStream] = useState<MediaStream | null>(null);
@@ -220,14 +220,14 @@ export default function MeetingRoom({
 							}));
 						});
 
-						peer.signal(signal);
+						peer.signal(signal as any);
 						peersRef.current[from] = { peer, stream: undefined };
 						setPeers((prev) => ({
 							...prev,
 							[from]: { peer, stream: undefined },
 						}));
 					} else if (type === "answer") {
-						peersRef.current[from]?.peer.signal(signal);
+						peersRef.current[from]?.peer.signal(signal as any);
 					}
 				});
 
