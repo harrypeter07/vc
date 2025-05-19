@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Socket } from "socket.io-client";
+import type { Socket } from "socket.io-client";
 import { ChatData } from "@/lib/socket";
 
 interface ChatMessage {

@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { io, Socket } from "socket.io-client";
+import { io } from "socket.io-client";
+import type { Socket } from "socket.io-client";
 import SimplePeer from "simple-peer";
 import VideoPlayer from "./VideoPlayer";
 import ChatPanel from "./ChatPanel";
 import Controls from "./Controls";
+import type { SignalData, ChatData } from "@/lib/socket";
 
 interface ChatMessage {
 	message: string;
@@ -150,42 +152,51 @@ export default function MeetingRoom({
 					newSocket.emit("join-room", { roomId, email, password });
 				});
 
-				newSocket.on("user-connected", ({ userId, clientCount }) => {
-					console.log("User connected:", userId);
-					setParticipantCount(clientCount);
+				newSocket.on(
+					"user-connected",
+					({
+						userId,
+						clientCount,
+					}: {
+						userId: string;
+						clientCount: number;
+					}) => {
+						console.log("User connected:", userId);
+						setParticipantCount(clientCount);
 
-					if (userId !== newSocket.id && stream) {
-						const peer = new SimplePeer({
-							initiator: true,
-							stream,
-							trickle: false,
-						});
-
-						peer.on("signal", (data) => {
-							newSocket.emit("signal", {
-								to: userId,
-								from: newSocket.id,
-								signal: data,
-								type: "offer",
+						if (userId !== newSocket.id && stream) {
+							const peer = new SimplePeer({
+								initiator: true,
+								stream,
+								trickle: false,
 							});
-						});
 
-						peer.on("stream", (remoteStream) => {
+							peer.on("signal", (data) => {
+								newSocket.emit("signal", {
+									to: userId,
+									from: newSocket.id,
+									signal: data,
+									type: "offer",
+								});
+							});
+
+							peer.on("stream", (remoteStream) => {
+								setPeers((prev) => ({
+									...prev,
+									[userId]: { ...prev[userId], stream: remoteStream },
+								}));
+							});
+
+							peersRef.current[userId] = { peer, stream: undefined };
 							setPeers((prev) => ({
 								...prev,
-								[userId]: { ...prev[userId], stream: remoteStream },
+								[userId]: { peer, stream: undefined },
 							}));
-						});
-
-						peersRef.current[userId] = { peer, stream: undefined };
-						setPeers((prev) => ({
-							...prev,
-							[userId]: { peer, stream: undefined },
-						}));
+						}
 					}
-				});
+				);
 
-				newSocket.on("signal", ({ from, signal, type }) => {
+				newSocket.on("signal", ({ from, signal, type }: SignalData) => {
 					if (type === "offer" && stream) {
 						const peer = new SimplePeer({
 							initiator: false,
@@ -220,22 +231,31 @@ export default function MeetingRoom({
 					}
 				});
 
-				newSocket.on("user-disconnected", ({ userId, clientCount }) => {
-					console.log("User disconnected:", userId);
-					setParticipantCount(clientCount);
+				newSocket.on(
+					"user-disconnected",
+					({
+						userId,
+						clientCount,
+					}: {
+						userId: string;
+						clientCount: number;
+					}) => {
+						console.log("User disconnected:", userId);
+						setParticipantCount(clientCount);
 
-					if (peersRef.current[userId]) {
-						peersRef.current[userId].peer.destroy();
-						delete peersRef.current[userId];
-						setPeers((prev) => {
-							const newPeers = { ...prev };
-							delete newPeers[userId];
-							return newPeers;
-						});
+						if (peersRef.current[userId]) {
+							peersRef.current[userId].peer.destroy();
+							delete peersRef.current[userId];
+							setPeers((prev) => {
+								const newPeers = { ...prev };
+								delete newPeers[userId];
+								return newPeers;
+							});
+						}
 					}
-				});
+				);
 
-				newSocket.on("chat", ({ message, sender }) => {
+				newSocket.on("chat", ({ message, sender }: ChatData) => {
 					console.log("Received chat message:", message, "from:", sender);
 					setChatMessages((prev) => [...prev, { message, sender }]);
 				});
