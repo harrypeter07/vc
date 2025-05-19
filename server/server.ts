@@ -1,4 +1,4 @@
-import { getIO } from "./src/lib/socket";
+import { getIO } from "./socket";
 
 // Initialize the Socket.IO server
 const io = getIO();

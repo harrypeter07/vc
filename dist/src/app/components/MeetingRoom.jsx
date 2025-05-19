@@ -105,7 +105,7 @@ function MeetingRoom({ roomId, email, password, }) {
             try {
                 setIsConnecting(true);
                 const newSocket = (0, socket_io_client_1.default)("https://vc-production-bc1c.up.railway.app", {
-                    path: "/api/socketio",
+                    path: "/socketio",
                     transports: ["websocket"],
                     autoConnect: false,
                     query: { email, roomId },

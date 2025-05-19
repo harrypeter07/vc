@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# new server build and source folders
+dist/
+server/node_modules/
+server/dist/

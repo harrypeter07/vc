@@ -16,7 +16,7 @@ const getIO = () => {
         httpServer = (0, http_1.createServer)();
     }
     io = new socket_io_1.Server(httpServer, {
-        path: "/api/socketio",
+        path: "/socketio",
         addTrailingSlash: false,
         cors: {
             origin: "*",

@@ -1,0 +1,20 @@
+{
+	"name": "vc-server",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"build": "tsc",
+		"start": "node dist/server.js",
+		"postinstall": "npm run build"
+	},
+	"dependencies": {
+		"socket.io": "^4.8.1"
+	},
+	"devDependencies": {
+		"typescript": "^5",
+		"ts-node": "^10.9.1"
+	},
+	"engines": {
+		"node": ">=18"
+	}
+}
