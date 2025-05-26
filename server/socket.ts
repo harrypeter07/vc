@@ -193,6 +193,20 @@ export const getIO = () => {
 			}
 		});
 
+		// Add support for screen sharing signaling
+		socket.on("screen-signal", ({ to, from, signal, type }: SignalData) => {
+			console.log(`Received ${type} (screen) signal from ${from} to ${to}`);
+			if (to && !io!.sockets.adapter.rooms.get(to)) {
+				console.log(`Target peer ${to} not found in any room (screen)`);
+				socket.emit("peer-disconnected", to);
+				return;
+			}
+			if (to) {
+				console.log(`Forwarding ${type} (screen) signal from ${from} to ${to}`);
+				io!.to(to).emit("screen-signal", { from, signal, type });
+			}
+		});
+
 		socket.on("chat", ({ roomId, message, sender }: ChatData) => {
 			console.log(
 				`Chat message received - Room: ${roomId}, Sender: ${sender}, Message: ${message}`

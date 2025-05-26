@@ -34,7 +34,7 @@ interface SignalData {
 	to?: string;
 	from: string;
 	signal: RTCSessionDescriptionInit | RTCIceCandidateInit;
-	type: "offer" | "answer";
+	type: "offer" | "answer" | "screen-offer" | "screen-answer";
 }
 
 interface ChatData {
@@ -59,10 +59,19 @@ export default function MeetingRoom({
 	const [isChatOpen, setIsChatOpen] = useState(false);
 	const [disconnectMsg, setDisconnectMsg] = useState<string | null>(null);
 	const [roomFullMsg, setRoomFullMsg] = useState<string | null>(null);
+	const [isScreenSharing, setIsScreenSharing] = useState(false);
+	const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+	const [screenPeers, setScreenPeers] = useState<{ [key: string]: PeerData }>(
+		{}
+	);
+	const screenPeersRef = useRef<{ [key: string]: PeerData }>({});
 
 	const localVideoRef = useRef<HTMLVideoElement | null>(null);
 	const peersRef = useRef<{ [key: string]: PeerData }>({});
 	const router = useRouter();
+
+	// Add a ref for the local screen share video
+	const localScreenVideoRef = useRef<HTMLVideoElement | null>(null);
 
 	// Initialize media stream
 	useEffect(() => {
@@ -352,6 +361,133 @@ export default function MeetingRoom({
 		}
 	};
 
+	// Screen sharing logic
+	const startScreenShare = async () => {
+		try {
+			const displayStream = await navigator.mediaDevices.getDisplayMedia({
+				video: true,
+				audio: false, // usually no audio for screen share
+			});
+			setScreenStream(displayStream);
+			setIsScreenSharing(true);
+
+			Object.keys(peersRef.current).forEach((userId) => {
+				const peer = new SimplePeer({
+					initiator: true,
+					stream: displayStream,
+					trickle: false,
+				});
+				peer.on("signal", (data) => {
+					if (socketRef.current) {
+						socketRef.current.emit("screen-signal", {
+							to: userId,
+							from: socketRef.current.id,
+							signal: data,
+							type: "screen-offer",
+						});
+					}
+				});
+				peer.on("stream", (remoteScreenStream) => {
+					setScreenPeers((prev) => ({
+						...prev,
+						[userId]: {
+							...prev[userId],
+							stream: remoteScreenStream || undefined,
+						},
+					}));
+				});
+				screenPeersRef.current[userId] = { peer, stream: undefined };
+				setScreenPeers((prev) => ({
+					...prev,
+					[userId]: { peer, stream: undefined },
+				}));
+			});
+
+			displayStream.getVideoTracks()[0].onended = () => {
+				stopScreenShare();
+			};
+		} catch (err) {
+			console.error("Failed to start screen sharing:", err);
+		}
+	};
+
+	const stopScreenShare = () => {
+		if (screenStream) {
+			screenStream.getTracks().forEach((track) => track.stop());
+		}
+		setIsScreenSharing(false);
+		setScreenStream(null);
+		Object.values(screenPeersRef.current).forEach(({ peer }) => peer.destroy());
+		screenPeersRef.current = {};
+		setScreenPeers({});
+	};
+
+	const handleScreenShareToggle = (enabled: boolean) => {
+		if (enabled) {
+			startScreenShare();
+		} else {
+			stopScreenShare();
+		}
+	};
+
+	// Listen for screen-signal events
+	useEffect(() => {
+		if (!socketRef.current) return;
+		const socket = socketRef.current;
+		const handleScreenSignal = ({ from, signal, type }: SignalData) => {
+			if (type === "screen-offer") {
+				const peer = new SimplePeer({
+					initiator: false,
+					stream: undefined,
+					trickle: false,
+				});
+				peer.on("signal", (data) => {
+					socket.emit("screen-signal", {
+						to: from,
+						from: socket.id,
+						signal: data,
+						type: "screen-answer",
+					});
+				});
+				peer.on("stream", (remoteScreenStream) => {
+					setScreenPeers((prev) => ({
+						...prev,
+						[from]: { ...prev[from], stream: remoteScreenStream || undefined },
+					}));
+				});
+				peer.signal(signal as any);
+				screenPeersRef.current[from] = { peer, stream: undefined };
+				setScreenPeers((prev) => ({
+					...prev,
+					[from]: { peer, stream: undefined },
+				}));
+			} else if (type === "screen-answer") {
+				screenPeersRef.current[from]?.peer.signal(signal as any);
+			}
+		};
+		socket.on("screen-signal", handleScreenSignal);
+		return () => {
+			socket.off("screen-signal", handleScreenSignal);
+		};
+	}, [socketRef.current]);
+
+	// Clean up screen share on unmount
+	useEffect(() => {
+		return () => {
+			stopScreenShare();
+		};
+	}, []);
+
+	// Set srcObject for local screen share video
+	useEffect(() => {
+		if (isScreenSharing && screenStream && localScreenVideoRef.current) {
+			localScreenVideoRef.current.srcObject = screenStream;
+		}
+		if (!isScreenSharing && localScreenVideoRef.current) {
+			localScreenVideoRef.current.srcObject = null;
+		}
+	}, [isScreenSharing, screenStream]);
+
 	if (error) {
 		return (
 			<div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
@@ -398,6 +534,25 @@ export default function MeetingRoom({
 								</div>
 							</div>
 						</div>
+						{/* Show local screen share if active */}
+						{isScreenSharing && screenStream && (
+							<div className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]">
+								<video
+									autoPlay
+									playsInline
+									muted
+									ref={localScreenVideoRef}
+									className="w-full h-full object-cover"
+									style={{ minHeight: "300px", backgroundColor: "#1f2937" }}
+								/>
+								<div className="absolute bottom-4 left-4 bg-black/40 px-3 py-1 rounded-lg">
+									<span className="text-green-400 text-sm font-medium">
+										You (Screen Sharing)
+									</span>
+								</div>
+							</div>
+						)}
+						{/* Show remote webcam streams */}
 						{Object.entries(peers).map(([userId, { stream: remoteStream }]) => (
 							<div
 								key={userId}
@@ -420,6 +575,36 @@ export default function MeetingRoom({
 								/>
 							</div>
 						))}
+						{/* Show remote screen share streams */}
+						{Object.entries(screenPeers)
+							.filter(
+								([, { stream: remoteScreenStream }]) =>
+									remoteScreenStream !== undefined &&
+									remoteScreenStream !== null
+							)
+							.map(([userId, { stream: remoteScreenStream }]) => (
+								<div
+									key={userId + "-screen"}
+									className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]"
+								>
+									<VideoPlayer
+										videoRef={() => {
+											if (screenPeersRef.current[userId]) {
+												const currentPeer = screenPeersRef.current[userId].peer;
+												screenPeersRef.current[userId] = {
+													peer: currentPeer,
+													stream: (remoteScreenStream ||
+														undefined) as MediaStream,
+												};
+											}
+										}}
+										stream={(remoteScreenStream || undefined) as MediaStream}
+										isMuted={true}
+										isLocal={false}
+										label={`Peer ${userId.slice(0, 8)} (Screen)`}
+									/>
+								</div>
+							))}
 					</div>
 				</div>
 
@@ -438,6 +623,8 @@ export default function MeetingRoom({
 				isChatOpen={isChatOpen}
 				onVideoToggle={toggleVideo}
 				onAudioToggle={toggleAudio}
+				onScreenShareToggle={handleScreenShareToggle}
+				isScreenSharing={isScreenSharing}
 			/>
 
 			{disconnectMsg && (
