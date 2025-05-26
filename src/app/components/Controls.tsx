@@ -7,6 +7,8 @@ interface ControlsProps {
 	isChatOpen: boolean;
 	onVideoToggle: (enabled: boolean) => void;
 	onAudioToggle: (enabled: boolean) => void;
+	onScreenShareToggle: (enabled: boolean) => void;
+	isScreenSharing: boolean;
 }
 
 export default function Controls({
@@ -15,6 +17,8 @@ export default function Controls({
 	isChatOpen,
 	onVideoToggle,
 	onAudioToggle,
+	onScreenShareToggle,
+	isScreenSharing,
 }: ControlsProps) {
 	const [isVideoEnabled, setIsVideoEnabled] = useState(true);
 	const [isAudioEnabled, setIsAudioEnabled] = useState(true);
@@ -30,6 +34,10 @@ export default function Controls({
 		const newState = !isAudioEnabled;
 		setIsAudioEnabled(newState);
 		onAudioToggle(newState);
+	};
+
+	const handleScreenShareToggle = () => {
+		onScreenShareToggle(!isScreenSharing);
 	};
 
 	const endCall = () => {
@@ -126,6 +134,41 @@ export default function Controls({
 							strokeWidth={2}
 							d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
 						/>
+					</svg>
+				</button>
+
+				<button
+					onClick={handleScreenShareToggle}
+					className={`p-3 rounded-full ${
+						isScreenSharing
+							? "bg-green-500 hover:bg-green-600"
+							: "bg-gray-600 hover:bg-gray-700"
+					}`}
+					title={
+						isScreenSharing ? "Stop Screen Sharing" : "Start Screen Sharing"
+					}
+				>
+					<svg
+						className="w-6 h-6 text-white"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						{isScreenSharing ? (
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								strokeWidth={2}
+								d="M9.75 17L6 21m0 0l-3.75-4M6 21V3m12 0v18m0 0l3.75-4M18 21l-3.75-4"
+							/>
+						) : (
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								strokeWidth={2}
+								d="M4 4h16v12H4zM4 20h16M8 16v4m8-4v4"
+							/>
+						)}
 					</svg>
 				</button>
 
