@@ -223,6 +223,37 @@ export const getIO = () => {
 			console.log(`Chat message broadcast to room ${roomId}`);
 		});
 
+		// Call signaling: call-initiate and call-accept
+		socket.on(
+			"call-initiate",
+			({ roomId, from }: { roomId: string; from: string }) => {
+				// Find the other user in the room
+				const room = io!.sockets.adapter.rooms.get(roomId);
+				if (room) {
+					for (const socketId of room) {
+						if (socketId !== from) {
+							io!.to(socketId).emit("call-incoming", { from });
+						}
+					}
+				}
+			}
+		);
+
+		socket.on(
+			"call-accept",
+			({ roomId, from }: { roomId: string; from: string }) => {
+				// Find the other user in the room
+				const room = io!.sockets.adapter.rooms.get(roomId);
+				if (room) {
+					for (const socketId of room) {
+						if (socketId !== from) {
+							io!.to(socketId).emit("call-accepted", { from });
+						}
+					}
+				}
+			}
+		);
+
 		socket.on("disconnect", () => {
 			console.log(`Client disconnecting: ${socket.id}`);
 			const rooms = Array.from(socket.rooms);

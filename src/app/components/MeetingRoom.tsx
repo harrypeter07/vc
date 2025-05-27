@@ -73,6 +73,10 @@ export default function MeetingRoom({
 	// Add a ref for the local screen share video
 	const localScreenVideoRef = useRef<HTMLVideoElement | null>(null);
 
+	const [callState, setCallState] = useState<
+		"waiting" | "can-call" | "incoming" | "accepted"
+	>("waiting");
+
 	// Initialize media stream
 	useEffect(() => {
 		const initStream = async () => {
@@ -488,6 +492,57 @@ export default function MeetingRoom({
 		}
 	}, [isScreenSharing, screenStream]);
 
+	// Track participants to determine call state
+	useEffect(() => {
+		if (participantCount === 1) {
+			setCallState("waiting");
+		} else if (participantCount === 2 && callState === "waiting") {
+			// If second user joins, allow to call
+			setCallState("can-call");
+		}
+	}, [participantCount]);
+
+	// Call signaling handlers
+	useEffect(() => {
+		if (!socketRef.current) return;
+		const socket = socketRef.current;
+		const handleCallIncoming = () => {
+			setCallState("incoming");
+		};
+		const handleCallAccepted = () => {
+			setCallState("accepted");
+		};
+		socket.on("call-incoming", handleCallIncoming);
+		socket.on("call-accepted", handleCallAccepted);
+		return () => {
+			socket.off("call-incoming", handleCallIncoming);
+			socket.off("call-accepted", handleCallAccepted);
+		};
+	}, [socketRef.current]);
+
+	const handleCallNow = () => {
+		if (socketRef.current) {
+			socketRef.current.emit("call-initiate", {
+				roomId,
+				from: socketRef.current.id,
+			});
+			setCallState("waiting"); // Wait for accept
+		}
+	};
+
+	const handleAcceptCall = () => {
+		if (socketRef.current) {
+			socketRef.current.emit("call-accept", {
+				roomId,
+				from: socketRef.current.id,
+			});
+			setCallState("accepted");
+		}
+	};
+
+	// Only allow peer connection setup if callState is 'accepted'
+	const canConnect = callState === "accepted";
+
 	if (error) {
 		return (
 			<div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
@@ -636,6 +691,126 @@ export default function MeetingRoom({
 			{roomFullMsg && (
 				<div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-yellow-500 text-white px-4 py-2 rounded shadow-lg z-50">
 					{roomFullMsg}
+				</div>
+			)}
+
+			{/* Call signaling UI */}
+			{callState === "waiting" && (
+				<div className="flex items-center justify-center h-full">
+					<p className="text-xl text-gray-300">Call not started yet.</p>
+				</div>
+			)}
+			{callState === "can-call" && (
+				<div className="flex items-center justify-center h-full">
+					<button
+						onClick={handleCallNow}
+						className="px-6 py-3 bg-green-600 text-white rounded-lg text-lg font-semibold shadow hover:bg-green-700"
+					>
+						Call Now
+					</button>
+				</div>
+			)}
+			{callState === "incoming" && (
+				<div className="flex items-center justify-center h-full">
+					<p className="text-xl text-gray-300 mr-4">Incoming call...</p>
+					<button
+						onClick={handleAcceptCall}
+						className="px-6 py-3 bg-blue-600 text-white rounded-lg text-lg font-semibold shadow hover:bg-blue-700"
+					>
+						Accept Call
+					</button>
+				</div>
+			)}
+			{/* Only show the rest of the meeting UI if callState is 'accepted' */}
+			{canConnect && (
+				<div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
+					<div className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]">
+						<div className="relative w-full h-full">
+							<video
+								ref={localVideoRef}
+								autoPlay
+								playsInline
+								muted
+								className="w-full h-full object-cover scale-x-[-1]"
+								style={{ minHeight: "300px", backgroundColor: "#1f2937" }}
+							/>
+							<div className="absolute bottom-4 left-4 bg-black/40 px-3 py-1 rounded-lg">
+								<span className="text-white text-sm font-medium">
+									You ({email})
+								</span>
+							</div>
+						</div>
+					</div>
+					{/* Show local screen share if active */}
+					{isScreenSharing && screenStream && (
+						<div className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]">
+							<video
+								autoPlay
+								playsInline
+								muted
+								ref={localScreenVideoRef}
+								className="w-full h-full object-cover"
+								style={{ minHeight: "300px", backgroundColor: "#1f2937" }}
+							/>
+							<div className="absolute bottom-4 left-4 bg-black/40 px-3 py-1 rounded-lg">
+								<span className="text-green-400 text-sm font-medium">
+									You (Screen Sharing)
+								</span>
+							</div>
+						</div>
+					)}
+					{/* Show remote webcam streams */}
+					{Object.entries(peers).map(([userId, { stream: remoteStream }]) => (
+						<div
+							key={userId}
+							className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]"
+						>
+							<VideoPlayer
+								videoRef={() => {
+									if (peersRef.current[userId]) {
+										const currentPeer = peersRef.current[userId].peer;
+										peersRef.current[userId] = {
+											peer: currentPeer,
+											stream: remoteStream,
+										};
+									}
+								}}
+								stream={remoteStream}
+								isMuted={false}
+								isLocal={false}
+								label={`Peer ${userId.slice(0, 8)}`}
+							/>
+						</div>
+					))}
+					{/* Show remote screen share streams */}
+					{Object.entries(screenPeers)
+						.filter(
+							([, { stream: remoteScreenStream }]) =>
+								remoteScreenStream !== undefined && remoteScreenStream !== null
+						)
+						.map(([userId, { stream: remoteScreenStream }]) => (
+							<div
+								key={userId + "-screen"}
+								className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]"
+							>
+								<VideoPlayer
+									videoRef={() => {
+										if (screenPeersRef.current[userId]) {
+											const currentPeer = screenPeersRef.current[userId].peer;
+											screenPeersRef.current[userId] = {
+												peer: currentPeer,
+												stream: (remoteScreenStream ||
+													undefined) as MediaStream,
+											};
+										}
+									}}
+									stream={(remoteScreenStream || undefined) as MediaStream}
+									isMuted={true}
+									isLocal={false}
+									label={`Peer ${userId.slice(0, 8)} (Screen)`}
+								/>
+							</div>
+						))}
 				</div>
 			)}
 		</div>
