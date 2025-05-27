@@ -268,6 +268,10 @@ export const getIO = () => {
 			}
 		);
 
+		socket.on("client-error", (data) => {
+			console.error(`[CLIENT ERROR][${socket.id}]`, data);
+		});
+
 		socket.on("disconnect", () => {
 			console.log(`Client disconnecting: ${socket.id}`);
 			const rooms = Array.from(socket.rooms);
