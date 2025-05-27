@@ -235,11 +235,15 @@ export const getIO = () => {
 				from: string;
 				email: string;
 			}) => {
+				console.log(
+					`[CALL] call-initiate from ${from} (${email}) in room ${roomId}`
+				);
 				// Find the other user in the room
 				const room = io!.sockets.adapter.rooms.get(roomId);
 				if (room) {
 					for (const socketId of room) {
 						if (socketId !== from) {
+							console.log(`[CALL] Forwarding call-incoming to ${socketId}`);
 							io!.to(socketId).emit("call-incoming", { from, email });
 						}
 					}
@@ -250,11 +254,13 @@ export const getIO = () => {
 		socket.on(
 			"call-accept",
 			({ roomId, from }: { roomId: string; from: string }) => {
+				console.log(`[CALL] call-accept from ${from} in room ${roomId}`);
 				// Find the other user in the room
 				const room = io!.sockets.adapter.rooms.get(roomId);
 				if (room) {
 					for (const socketId of room) {
 						if (socketId !== from) {
+							console.log(`[CALL] Forwarding call-accepted to ${socketId}`);
 							io!.to(socketId).emit("call-accepted", { from });
 						}
 					}
