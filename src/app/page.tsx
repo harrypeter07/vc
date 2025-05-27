@@ -13,6 +13,18 @@ export default function Home() {
 	// Helper to check if roomId is exactly 5 alphanumeric chars
 	const isValidRoomId = (id: string) => /^[a-zA-Z0-9]{5}$/.test(id);
 
+	// Helper to generate a random 5-character alphanumeric room ID
+	const generateRoomId = () => {
+		const chars =
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+		let result = "";
+		for (let i = 0; i < 5; i++) {
+			result += chars.charAt(Math.floor(Math.random() * chars.length));
+		}
+		setRoomId(result);
+		setRoomError("");
+	};
+
 	const createRoom = () => {
 		if (!isValidRoomId(roomId)) {
 			setRoomError("Room code must be exactly 5 alphanumeric characters.");
@@ -60,19 +72,29 @@ export default function Home() {
 							<label htmlFor="room-id" className="sr-only">
 								Room ID
 							</label>
-							<input
-								type="text"
-								id="room-id"
-								value={roomId}
-								onChange={(e) => {
-									setRoomId(e.target.value);
-									setRoomError("");
-								}}
-								placeholder="Enter 5-char Room Code (e.g. ABC12)"
-								className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-								maxLength={5}
-								required
-							/>
+							<div className="flex gap-2">
+								<input
+									type="text"
+									id="room-id"
+									value={roomId}
+									onChange={(e) => {
+										setRoomId(e.target.value);
+										setRoomError("");
+									}}
+									placeholder="Enter 5-char Room Code (e.g. ABC12)"
+									className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									maxLength={5}
+									required
+								/>
+								<button
+									type="button"
+									onClick={generateRoomId}
+									className="px-3 py-2 bg-gray-200 rounded-md text-gray-700 hover:bg-gray-300 focus:outline-none"
+									title="Generate random room code"
+								>
+									Generate
+								</button>
+							</div>
 						</div>
 						<div>
 							<label htmlFor="email" className="sr-only">
