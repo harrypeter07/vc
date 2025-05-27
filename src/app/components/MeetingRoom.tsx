@@ -50,7 +50,6 @@ export default function MeetingRoom({
 }: MeetingRoomProps) {
 	const [socket, setSocket] = useState<ReturnType<typeof io> | null>(null);
 	const socketRef = useRef<ReturnType<typeof io> | null>(null);
-	const [isConnecting, setIsConnecting] = useState(false);
 	const [peers, setPeers] = useState<{ [key: string]: PeerData }>({});
 	const [stream, setStream] = useState<MediaStream | null>(null);
 	const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -77,9 +76,17 @@ export default function MeetingRoom({
 		"waiting" | "can-call" | "incoming" | "accepted"
 	>("waiting");
 
-	// Initialize media stream
+	// Only initialize media and socket after call is accepted
+	const [mediaReady, setMediaReady] = useState(false);
+
 	useEffect(() => {
-		const initStream = async () => {
+		if (callState !== "accepted") {
+			return;
+		}
+
+		let isMounted = true;
+
+		const initStreamAndSocket = async () => {
 			try {
 				const mediaStream = await navigator.mediaDevices.getUserMedia({
 					video: {
@@ -90,87 +97,41 @@ export default function MeetingRoom({
 					audio: true,
 				});
 
-				// Enable all tracks explicitly
 				mediaStream.getTracks().forEach((track) => {
 					track.enabled = true;
-					console.log(`Track enabled: ${track.kind}`, track.enabled);
 				});
 
-				// Set stream to state
-				setStream(mediaStream);
-
-				// Directly set stream to local video element
-				if (localVideoRef.current) {
-					console.log("Attaching stream to local video element");
-
-					// Remove any existing stream first
-					if (localVideoRef.current.srcObject) {
-						localVideoRef.current.srcObject = null;
-					}
-
-					// Wait a bit before setting new stream
-					await new Promise((resolve) => setTimeout(resolve, 100));
-
-					localVideoRef.current.srcObject = mediaStream;
-
-					// Handle loadedmetadata event
-					const handleLoadedMetadata = async () => {
-						try {
-							// Only attempt to play if video is paused
-							if (localVideoRef.current?.paused) {
-								await localVideoRef.current.play();
-								console.log("Local video playing after metadata loaded");
-							}
-						} catch (err) {
-							console.error("Error playing local video:", err);
-						}
-					};
-
-					// Add event listener for loadedmetadata
-					localVideoRef.current.addEventListener(
-						"loadedmetadata",
-						handleLoadedMetadata
-					);
-
-					// Cleanup function to remove event listener
-					return () => {
-						localVideoRef.current?.removeEventListener(
-							"loadedmetadata",
-							handleLoadedMetadata
-						);
-					};
-				} else {
-					console.error("Local video element not found");
+				if (isMounted) {
+					setStream(mediaStream);
+					setMediaReady(true);
 				}
 			} catch (err) {
 				console.error("Failed to get media stream:", err);
-				setError("Failed to access camera and microphone");
+				if (isMounted) setError("Failed to access camera and microphone");
 			}
 		};
 
-		initStream();
+		initStreamAndSocket();
 
 		return () => {
+			isMounted = false;
 			if (stream) {
 				stream.getTracks().forEach((track) => {
 					track.stop();
-					console.log(`Track stopped: ${track.kind}`);
 				});
 			}
 			if (localVideoRef.current) {
 				localVideoRef.current.srcObject = null;
 			}
 		};
-	}, []); // Empty dependency array as we only want this to run once
+	}, [callState]);
 
-	// Initialize socket connection
+	// Only initialize socket and peer logic after media is ready and call is accepted
 	useEffect(() => {
-		if (!stream || isConnecting) return;
+		if (!mediaReady || callState !== "accepted") return;
 
 		const initSocket = async () => {
 			try {
-				setIsConnecting(true);
-
 				const newSocket = io(SOCKET_SERVER_URL, {
 					path: "/socketio",
 					transports: ["websocket"],
@@ -309,8 +270,6 @@ export default function MeetingRoom({
 			} catch (err) {
 				console.error("Socket initialization failed:", err);
 				setError("Failed to connect to the room");
-			} finally {
-				setIsConnecting(false);
 			}
 		};
 
@@ -323,7 +282,7 @@ export default function MeetingRoom({
 			Object.values(peersRef.current).forEach(({ peer }) => peer.destroy());
 			peersRef.current = {};
 		};
-	}, [stream, roomId, email, password, router]);
+	}, [mediaReady, callState, stream, roomId, email, password, router]);
 
 	const toggleChat = () => {
 		setIsChatOpen(!isChatOpen);
@@ -721,8 +680,8 @@ export default function MeetingRoom({
 					</button>
 				</div>
 			)}
-			{/* Only show the rest of the meeting UI if callState is 'accepted' */}
-			{canConnect && (
+			{/* Only show the rest of the meeting UI if callState is 'accepted' and mediaReady is true */}
+			{canConnect && mediaReady && (
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
 					<div className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]">
 						<div className="relative w-full h-full">
