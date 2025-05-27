@@ -159,6 +159,7 @@ export default function MeetingRoom({
 
 		const initSocket = async () => {
 			try {
+				console.log("[Socket] Connecting to", SOCKET_SERVER_URL);
 				const newSocket = io(SOCKET_SERVER_URL, {
 					path: "/socketio",
 					transports: ["websocket"],
@@ -170,7 +171,7 @@ export default function MeetingRoom({
 				setSocket(newSocket);
 
 				newSocket.on("connect", () => {
-					console.log("Socket connected:", newSocket.id);
+					console.log("[Socket] Connected:", newSocket.id);
 					newSocket.emit("join-room", { roomId, email, password });
 				});
 
@@ -183,7 +184,9 @@ export default function MeetingRoom({
 						userId: string;
 						clientCount: number;
 					}) => {
-						console.log("User connected:", userId);
+						console.log(
+							`[Socket] User connected: ${userId}, clientCount: ${clientCount}`
+						);
 						setParticipantCount(clientCount);
 
 						if (userId !== newSocket.id && stream) {
@@ -219,6 +222,7 @@ export default function MeetingRoom({
 				);
 
 				newSocket.on("signal", ({ from, signal, type }: SignalData) => {
+					console.log(`[Socket] Received signal: type=${type}, from=${from}`);
 					if (type === "offer" && stream) {
 						const peer = new SimplePeer({
 							initiator: false,
@@ -284,6 +288,7 @@ export default function MeetingRoom({
 				});
 
 				newSocket.on("room-full", (data: { message: string }) => {
+					console.warn("[Socket] Room full:", data);
 					setRoomFullMsg(
 						data.message || "This room is full. Maximum 2 participants allowed."
 					);
@@ -293,9 +298,27 @@ export default function MeetingRoom({
 					}, 3000);
 				});
 
+				newSocket.on("join-error", (data: any) => {
+					console.error("[Socket] Join error:", data);
+					setError(data.message || "Join error");
+				});
+
+				newSocket.on("disconnect", (reason: any) => {
+					console.warn("[Socket] Disconnected:", reason);
+				});
+
+				newSocket.on("connect_error", (err: any) => {
+					emitClientError(newSocket, err, "connect_error");
+					setError("Failed to connect to the server.");
+				});
+
+				newSocket.on("client-error", (data: any) => {
+					console.error("[Server] Client error event:", data);
+				});
+
 				newSocket.connect();
 			} catch (err) {
-				console.error("Socket initialization failed:", err);
+				emitClientError(socketRef.current, err, "initSocket");
 				setError("Failed to connect to the room");
 			}
 		};
@@ -502,11 +525,21 @@ export default function MeetingRoom({
 	useEffect(() => {
 		if (!socketRef.current) return;
 		const socket = socketRef.current;
-		const handleCallIncoming = ({ email }: { from: string; email: string }) => {
+		const handleCallIncoming = ({
+			email,
+		}: {
+			from?: string;
+			email: string;
+		}) => {
+			console.log("[Socket] Received call-incoming:", {
+				from: "(not provided)",
+				email,
+			});
 			setCallerEmail(email);
 			setCallState("incoming");
 		};
 		const handleCallAccepted = () => {
+			console.log("[Socket] Received call-accepted:");
 			setCallState("accepted");
 		};
 		socket.on("call-incoming", handleCallIncoming);
@@ -519,6 +552,11 @@ export default function MeetingRoom({
 
 	const handleCallNow = () => {
 		if (socketRef.current) {
+			console.log("[Socket] Emitting call-initiate:", {
+				roomId,
+				from: socketRef.current.id,
+				email,
+			});
 			socketRef.current.emit("call-initiate", {
 				roomId,
 				from: socketRef.current.id,
@@ -530,6 +568,10 @@ export default function MeetingRoom({
 
 	const handleAcceptCall = () => {
 		if (socketRef.current) {
+			console.log("[Socket] Emitting call-accept:", {
+				roomId,
+				from: socketRef.current.id,
+			});
 			socketRef.current.emit("call-accept", {
 				roomId,
 				from: socketRef.current.id,
@@ -540,6 +582,17 @@ export default function MeetingRoom({
 
 	// Only allow peer connection setup if callState is 'accepted'
 	const canConnect = callState === "accepted";
+
+	// Helper to emit client errors to the server
+	function emitClientError(socket: any, error: any, context: string) {
+		if (socket && socket.emit) {
+			socket.emit("client-error", {
+				error: error?.message || String(error),
+				context,
+			});
+		}
+		console.error(`[CLIENT ERROR][${context}]`, error);
+	}
 
 	if (error) {
 		return (
