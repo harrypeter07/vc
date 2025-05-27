@@ -303,5 +303,14 @@ export const getIO = () => {
 		});
 	});
 
+	if (httpServer) {
+		httpServer.on("request", (req, res) => {
+			if (req.url === "/" && req.method === "GET") {
+				res.writeHead(200, { "Content-Type": "text/plain" });
+				res.end("Socket.IO server is running");
+			}
+		});
+	}
+
 	return io;
 };
