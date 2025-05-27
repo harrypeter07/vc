@@ -79,6 +79,33 @@ export default function MeetingRoom({
 	// Only initialize media and socket after call is accepted
 	const [mediaReady, setMediaReady] = useState(false);
 
+	// Add a simple spinner component
+	function Spinner() {
+		return (
+			<svg
+				className="animate-spin h-8 w-8 text-blue-500"
+				xmlns="http://www.w3.org/2000/svg"
+				fill="none"
+				viewBox="0 0 24 24"
+			>
+				<circle
+					className="opacity-25"
+					cx="12"
+					cy="12"
+					r="10"
+					stroke="currentColor"
+					strokeWidth="4"
+				/>
+				<path
+					className="opacity-75"
+					fill="currentColor"
+					d="M4 12a8 8 0 018-8v8z"
+				/>
+			</svg>
+		);
+	}
+
+	// Only initialize media and socket after call is accepted
 	useEffect(() => {
 		if (callState !== "accepted") {
 			return;
@@ -461,11 +488,15 @@ export default function MeetingRoom({
 		}
 	}, [participantCount]);
 
+	// In call signaling handlers, store caller email for incoming call
+	const [callerEmail, setCallerEmail] = useState<string | null>(null);
+
 	// Call signaling handlers
 	useEffect(() => {
 		if (!socketRef.current) return;
 		const socket = socketRef.current;
-		const handleCallIncoming = () => {
+		const handleCallIncoming = ({ email }: { from: string; email: string }) => {
+			setCallerEmail(email);
 			setCallState("incoming");
 		};
 		const handleCallAccepted = () => {
@@ -484,6 +515,7 @@ export default function MeetingRoom({
 			socketRef.current.emit("call-initiate", {
 				roomId,
 				from: socketRef.current.id,
+				email,
 			});
 			setCallState("waiting"); // Wait for accept
 		}
@@ -655,8 +687,11 @@ export default function MeetingRoom({
 
 			{/* Call signaling UI */}
 			{callState === "waiting" && (
-				<div className="flex items-center justify-center h-full">
-					<p className="text-xl text-gray-300">Call not started yet.</p>
+				<div className="flex flex-col items-center justify-center h-full space-y-4">
+					<Spinner />
+					<p className="text-xl text-gray-300 mt-4">
+						Please wait while we are connecting you...
+					</p>
 				</div>
 			)}
 			{callState === "can-call" && (
@@ -670,8 +705,11 @@ export default function MeetingRoom({
 				</div>
 			)}
 			{callState === "incoming" && (
-				<div className="flex items-center justify-center h-full">
-					<p className="text-xl text-gray-300 mr-4">Incoming call...</p>
+				<div className="flex flex-col items-center justify-center h-full space-y-4">
+					<Spinner />
+					<p className="text-xl text-gray-300">
+						Incoming call{callerEmail ? ` from ${callerEmail}` : ""}...
+					</p>
 					<button
 						onClick={handleAcceptCall}
 						className="px-6 py-3 bg-blue-600 text-white rounded-lg text-lg font-semibold shadow hover:bg-blue-700"

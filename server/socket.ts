@@ -226,13 +226,21 @@ export const getIO = () => {
 		// Call signaling: call-initiate and call-accept
 		socket.on(
 			"call-initiate",
-			({ roomId, from }: { roomId: string; from: string }) => {
+			({
+				roomId,
+				from,
+				email,
+			}: {
+				roomId: string;
+				from: string;
+				email: string;
+			}) => {
 				// Find the other user in the room
 				const room = io!.sockets.adapter.rooms.get(roomId);
 				if (room) {
 					for (const socketId of room) {
 						if (socketId !== from) {
-							io!.to(socketId).emit("call-incoming", { from });
+							io!.to(socketId).emit("call-incoming", { from, email });
 						}
 					}
 				}
