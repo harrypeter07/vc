@@ -480,13 +480,20 @@ export default function MeetingRoom({
 
 	// Track participants to determine call state
 	useEffect(() => {
-		if (participantCount === 1) {
+		console.log(
+			"[CallState] participantCount:",
+			participantCount,
+			"callState:",
+			callState
+		);
+		if (participantCount === 1 && callState !== "waiting") {
 			setCallState("waiting");
+			console.log("[CallState] Only one participant, set to waiting");
 		} else if (participantCount === 2 && callState === "waiting") {
-			// If second user joins, allow to call
 			setCallState("can-call");
+			console.log("[CallState] Two participants, set to can-call");
 		}
-	}, [participantCount]);
+	}, [participantCount, callState]);
 
 	// In call signaling handlers, store caller email for incoming call
 	const [callerEmail, setCallerEmail] = useState<string | null>(null);
