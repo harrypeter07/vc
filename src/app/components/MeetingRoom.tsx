@@ -50,6 +50,7 @@ export default function MeetingRoom({
 }: MeetingRoomProps) {
 	const [socket, setSocket] = useState<ReturnType<typeof io> | null>(null);
 	const socketRef = useRef<ReturnType<typeof io> | null>(null);
+	const [isConnecting, setIsConnecting] = useState(false);
 	const [peers, setPeers] = useState<{ [key: string]: PeerData }>({});
 	const [stream, setStream] = useState<MediaStream | null>(null);
 	const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -72,48 +73,9 @@ export default function MeetingRoom({
 	// Add a ref for the local screen share video
 	const localScreenVideoRef = useRef<HTMLVideoElement | null>(null);
 
-	const [callState, setCallState] = useState<
-		"waiting" | "can-call" | "incoming" | "accepted"
-	>("waiting");
-
-	// Only initialize media and socket after call is accepted
-	const [mediaReady, setMediaReady] = useState(false);
-
-	// Add a simple spinner component
-	function Spinner() {
-		return (
-			<svg
-				className="animate-spin h-8 w-8 text-blue-500"
-				xmlns="http://www.w3.org/2000/svg"
-				fill="none"
-				viewBox="0 0 24 24"
-			>
-				<circle
-					className="opacity-25"
-					cx="12"
-					cy="12"
-					r="10"
-					stroke="currentColor"
-					strokeWidth="4"
-				/>
-				<path
-					className="opacity-75"
-					fill="currentColor"
-					d="M4 12a8 8 0 018-8v8z"
-				/>
-			</svg>
-		);
-	}
-
-	// Only initialize media and socket after call is accepted
+	// Initialize media stream
 	useEffect(() => {
-		if (callState !== "accepted") {
-			return;
-		}
-
-		let isMounted = true;
-
-		const initStreamAndSocket = async () => {
+		const initStream = async () => {
 			try {
 				const mediaStream = await navigator.mediaDevices.getUserMedia({
 					video: {
@@ -124,42 +86,87 @@ export default function MeetingRoom({
 					audio: true,
 				});
 
+				// Enable all tracks explicitly
 				mediaStream.getTracks().forEach((track) => {
 					track.enabled = true;
+					console.log(`Track enabled: ${track.kind}`, track.enabled);
 				});
 
-				if (isMounted) {
-					setStream(mediaStream);
-					setMediaReady(true);
+				// Set stream to state
+				setStream(mediaStream);
+
+				// Directly set stream to local video element
+				if (localVideoRef.current) {
+					console.log("Attaching stream to local video element");
+
+					// Remove any existing stream first
+					if (localVideoRef.current.srcObject) {
+						localVideoRef.current.srcObject = null;
+					}
+
+					// Wait a bit before setting new stream
+					await new Promise((resolve) => setTimeout(resolve, 100));
+
+					localVideoRef.current.srcObject = mediaStream;
+
+					// Handle loadedmetadata event
+					const handleLoadedMetadata = async () => {
+						try {
+							// Only attempt to play if video is paused
+							if (localVideoRef.current?.paused) {
+								await localVideoRef.current.play();
+								console.log("Local video playing after metadata loaded");
+							}
+						} catch (err) {
+							console.error("Error playing local video:", err);
+						}
+					};
+
+					// Add event listener for loadedmetadata
+					localVideoRef.current.addEventListener(
+						"loadedmetadata",
+						handleLoadedMetadata
+					);
+
+					// Cleanup function to remove event listener
+					return () => {
+						localVideoRef.current?.removeEventListener(
+							"loadedmetadata",
+							handleLoadedMetadata
+						);
+					};
+				} else {
+					console.error("Local video element not found");
 				}
 			} catch (err) {
 				console.error("Failed to get media stream:", err);
-				if (isMounted) setError("Failed to access camera and microphone");
+				setError("Failed to access camera and microphone");
 			}
 		};
 
-		initStreamAndSocket();
+		initStream();
 
 		return () => {
-			isMounted = false;
 			if (stream) {
 				stream.getTracks().forEach((track) => {
 					track.stop();
+					console.log(`Track stopped: ${track.kind}`);
 				});
 			}
 			if (localVideoRef.current) {
 				localVideoRef.current.srcObject = null;
 			}
 		};
-	}, [callState]);
+	}, []); // Empty dependency array as we only want this to run once
 
-	// Only initialize socket and peer logic after media is ready and call is accepted
+	// Initialize socket connection
 	useEffect(() => {
-		if (!mediaReady || callState !== "accepted") return;
+		if (!stream || isConnecting) return;
 
 		const initSocket = async () => {
 			try {
-				console.log("[Socket] Connecting to", SOCKET_SERVER_URL);
+				setIsConnecting(true);
+
 				const newSocket = io(SOCKET_SERVER_URL, {
 					path: "/socketio",
 					transports: ["websocket"],
@@ -171,7 +178,7 @@ export default function MeetingRoom({
 				setSocket(newSocket);
 
 				newSocket.on("connect", () => {
-					console.log("[Socket] Connected:", newSocket.id);
+					console.log("Socket connected:", newSocket.id);
 					newSocket.emit("join-room", { roomId, email, password });
 				});
 
@@ -184,9 +191,7 @@ export default function MeetingRoom({
 						userId: string;
 						clientCount: number;
 					}) => {
-						console.log(
-							`[Socket] User connected: ${userId}, clientCount: ${clientCount}`
-						);
+						console.log("User connected:", userId);
 						setParticipantCount(clientCount);
 
 						if (userId !== newSocket.id && stream) {
@@ -222,7 +227,6 @@ export default function MeetingRoom({
 				);
 
 				newSocket.on("signal", ({ from, signal, type }: SignalData) => {
-					console.log(`[Socket] Received signal: type=${type}, from=${from}`);
 					if (type === "offer" && stream) {
 						const peer = new SimplePeer({
 							initiator: false,
@@ -288,7 +292,6 @@ export default function MeetingRoom({
 				});
 
 				newSocket.on("room-full", (data: { message: string }) => {
-					console.warn("[Socket] Room full:", data);
 					setRoomFullMsg(
 						data.message || "This room is full. Maximum 2 participants allowed."
 					);
@@ -298,28 +301,12 @@ export default function MeetingRoom({
 					}, 3000);
 				});
 
-				newSocket.on("join-error", (data: any) => {
-					console.error("[Socket] Join error:", data);
-					setError(data.message || "Join error");
-				});
-
-				newSocket.on("disconnect", (reason: any) => {
-					console.warn("[Socket] Disconnected:", reason);
-				});
-
-				newSocket.on("connect_error", (err: any) => {
-					emitClientError(newSocket, err, "connect_error");
-					setError("Failed to connect to the server.");
-				});
-
-				newSocket.on("client-error", (data: any) => {
-					console.error("[Server] Client error event:", data);
-				});
-
 				newSocket.connect();
 			} catch (err) {
-				emitClientError(socketRef.current, err, "initSocket");
+				console.error("Socket initialization failed:", err);
 				setError("Failed to connect to the room");
+			} finally {
+				setIsConnecting(false);
 			}
 		};
 
@@ -332,7 +319,7 @@ export default function MeetingRoom({
 			Object.values(peersRef.current).forEach(({ peer }) => peer.destroy());
 			peersRef.current = {};
 		};
-	}, [mediaReady, callState, stream, roomId, email, password, router]);
+	}, [stream, roomId, email, password, router]);
 
 	const toggleChat = () => {
 		setIsChatOpen(!isChatOpen);
@@ -501,99 +488,6 @@ export default function MeetingRoom({
 		}
 	}, [isScreenSharing, screenStream]);
 
-	// Track participants to determine call state
-	useEffect(() => {
-		console.log(
-			"[CallState] participantCount:",
-			participantCount,
-			"callState:",
-			callState
-		);
-		if (participantCount === 1 && callState !== "waiting") {
-			setCallState("waiting");
-			console.log("[CallState] Only one participant, set to waiting");
-		} else if (participantCount === 2 && callState === "waiting") {
-			setCallState("can-call");
-			console.log("[CallState] Two participants, set to can-call");
-		}
-	}, [participantCount, callState]);
-
-	// In call signaling handlers, store caller email for incoming call
-	const [callerEmail, setCallerEmail] = useState<string | null>(null);
-
-	// Call signaling handlers
-	useEffect(() => {
-		if (!socketRef.current) return;
-		const socket = socketRef.current;
-		const handleCallIncoming = ({
-			email,
-		}: {
-			from?: string;
-			email: string;
-		}) => {
-			console.log("[Socket] Received call-incoming:", {
-				from: "(not provided)",
-				email,
-			});
-			setCallerEmail(email);
-			setCallState("incoming");
-		};
-		const handleCallAccepted = () => {
-			console.log("[Socket] Received call-accepted:");
-			setCallState("accepted");
-		};
-		socket.on("call-incoming", handleCallIncoming);
-		socket.on("call-accepted", handleCallAccepted);
-		return () => {
-			socket.off("call-incoming", handleCallIncoming);
-			socket.off("call-accepted", handleCallAccepted);
-		};
-	}, [socketRef.current]);
-
-	const handleCallNow = () => {
-		if (socketRef.current) {
-			console.log("[Socket] Emitting call-initiate:", {
-				roomId,
-				from: socketRef.current.id,
-				email,
-			});
-			socketRef.current.emit("call-initiate", {
-				roomId,
-				from: socketRef.current.id,
-				email,
-			});
-			setCallState("waiting"); // Wait for accept
-		}
-	};
-
-	const handleAcceptCall = () => {
-		if (socketRef.current) {
-			console.log("[Socket] Emitting call-accept:", {
-				roomId,
-				from: socketRef.current.id,
-			});
-			socketRef.current.emit("call-accept", {
-				roomId,
-				from: socketRef.current.id,
-			});
-			setCallState("accepted");
-		}
-	};
-
-	// Only allow peer connection setup if callState is 'accepted'
-	const canConnect = callState === "accepted";
-
-	// Helper to emit client errors to the server
-	function emitClientError(socket: any, error: any, context: string) {
-		if (socket && socket.emit) {
-			socket.emit("client-error", {
-				error: error?.message || String(error),
-				context,
-			});
-		}
-		console.error(`[CLIENT ERROR][${context}]`, error);
-	}
-
 	if (error) {
 		return (
 			<div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
@@ -742,132 +636,6 @@ export default function MeetingRoom({
 			{roomFullMsg && (
 				<div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-yellow-500 text-white px-4 py-2 rounded shadow-lg z-50">
 					{roomFullMsg}
-				</div>
-			)}
-
-			{/* Call signaling UI */}
-			{callState === "waiting" && (
-				<div className="flex flex-col items-center justify-center h-full space-y-4">
-					<Spinner />
-					<p className="text-xl text-gray-300 mt-4">
-						Please wait while we are connecting you...
-					</p>
-				</div>
-			)}
-			{callState === "can-call" && (
-				<div className="flex items-center justify-center h-full">
-					<button
-						onClick={handleCallNow}
-						className="px-6 py-3 bg-green-600 text-white rounded-lg text-lg font-semibold shadow hover:bg-green-700"
-					>
-						Call Now
-					</button>
-				</div>
-			)}
-			{callState === "incoming" && (
-				<div className="flex flex-col items-center justify-center h-full space-y-4">
-					<Spinner />
-					<p className="text-xl text-gray-300">
-						Incoming call{callerEmail ? ` from ${callerEmail}` : ""}...
-					</p>
-					<button
-						onClick={handleAcceptCall}
-						className="px-6 py-3 bg-blue-600 text-white rounded-lg text-lg font-semibold shadow hover:bg-blue-700"
-					>
-						Accept Call
-					</button>
-				</div>
-			)}
-			{/* Only show the rest of the meeting UI if callState is 'accepted' and mediaReady is true */}
-			{canConnect && mediaReady && (
-				<div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
-					<div className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]">
-						<div className="relative w-full h-full">
-							<video
-								ref={localVideoRef}
-								autoPlay
-								playsInline
-								muted
-								className="w-full h-full object-cover scale-x-[-1]"
-								style={{ minHeight: "300px", backgroundColor: "#1f2937" }}
-							/>
-							<div className="absolute bottom-4 left-4 bg-black/40 px-3 py-1 rounded-lg">
-								<span className="text-white text-sm font-medium">
-									You ({email})
-								</span>
-							</div>
-						</div>
-					</div>
-					{/* Show local screen share if active */}
-					{isScreenSharing && screenStream && (
-						<div className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]">
-							<video
-								autoPlay
-								playsInline
-								muted
-								ref={localScreenVideoRef}
-								className="w-full h-full object-cover"
-								style={{ minHeight: "300px", backgroundColor: "#1f2937" }}
-							/>
-							<div className="absolute bottom-4 left-4 bg-black/40 px-3 py-1 rounded-lg">
-								<span className="text-green-400 text-sm font-medium">
-									You (Screen Sharing)
-								</span>
-							</div>
-						</div>
-					)}
-					{/* Show remote webcam streams */}
-					{Object.entries(peers).map(([userId, { stream: remoteStream }]) => (
-						<div
-							key={userId}
-							className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]"
-						>
-							<VideoPlayer
-								videoRef={() => {
-									if (peersRef.current[userId]) {
-										const currentPeer = peersRef.current[userId].peer;
-										peersRef.current[userId] = {
-											peer: currentPeer,
-											stream: remoteStream,
-										};
-									}
-								}}
-								stream={remoteStream}
-								isMuted={false}
-								isLocal={false}
-								label={`Peer ${userId.slice(0, 8)}`}
-							/>
-						</div>
-					))}
-					{/* Show remote screen share streams */}
-					{Object.entries(screenPeers)
-						.filter(
-							([, { stream: remoteScreenStream }]) =>
-								remoteScreenStream !== undefined && remoteScreenStream !== null
-						)
-						.map(([userId, { stream: remoteScreenStream }]) => (
-							<div
-								key={userId + "-screen"}
-								className="relative bg-gray-800 rounded-lg overflow-hidden min-h-[300px]"
-							>
-								<VideoPlayer
-									videoRef={() => {
-										if (screenPeersRef.current[userId]) {
-											const currentPeer = screenPeersRef.current[userId].peer;
-											screenPeersRef.current[userId] = {
-												peer: currentPeer,
-												stream: (remoteScreenStream ||
-													undefined) as MediaStream,
-											};
-										}
-									}}
-									stream={(remoteScreenStream || undefined) as MediaStream}
-									isMuted={true}
-									isLocal={false}
-									label={`Peer ${userId.slice(0, 8)} (Screen)`}
-								/>
-							</div>
-						))}
 				</div>
 			)}
 		</div>

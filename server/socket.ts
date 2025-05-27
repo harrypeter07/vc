@@ -223,55 +223,6 @@ export const getIO = () => {
 			console.log(`Chat message broadcast to room ${roomId}`);
 		});
 
-		// Call signaling: call-initiate and call-accept
-		socket.on(
-			"call-initiate",
-			({
-				roomId,
-				from,
-				email,
-			}: {
-				roomId: string;
-				from: string;
-				email: string;
-			}) => {
-				console.log(
-					`[CALL] call-initiate from ${from} (${email}) in room ${roomId}`
-				);
-				// Find the other user in the room
-				const room = io!.sockets.adapter.rooms.get(roomId);
-				if (room) {
-					for (const socketId of room) {
-						if (socketId !== from) {
-							console.log(`[CALL] Forwarding call-incoming to ${socketId}`);
-							io!.to(socketId).emit("call-incoming", { from, email });
-						}
-					}
-				}
-			}
-		);
-
-		socket.on(
-			"call-accept",
-			({ roomId, from }: { roomId: string; from: string }) => {
-				console.log(`[CALL] call-accept from ${from} in room ${roomId}`);
-				// Find the other user in the room
-				const room = io!.sockets.adapter.rooms.get(roomId);
-				if (room) {
-					for (const socketId of room) {
-						if (socketId !== from) {
-							console.log(`[CALL] Forwarding call-accepted to ${socketId}`);
-							io!.to(socketId).emit("call-accepted", { from });
-						}
-					}
-				}
-			}
-		);
-
-		socket.on("client-error", (data) => {
-			console.error(`[CLIENT ERROR][${socket.id}]`, data);
-		});
-
 		socket.on("disconnect", () => {
 			console.log(`Client disconnecting: ${socket.id}`);
 			const rooms = Array.from(socket.rooms);
@@ -302,15 +253,6 @@ export const getIO = () => {
 			});
 		});
 	});
-
-	if (httpServer) {
-		httpServer.on("request", (req, res) => {
-			if (req.url === "/" && req.method === "GET") {
-				res.writeHead(200, { "Content-Type": "text/plain" });
-				res.end("Socket.IO server is running");
-			}
-		});
-	}
 
 	return io;
 };

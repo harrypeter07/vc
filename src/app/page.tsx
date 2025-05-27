@@ -7,32 +7,12 @@ export default function Home() {
 	const [roomId, setRoomId] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
-	const [roomError, setRoomError] = useState("");
 	const router = useRouter();
 
-	// Helper to check if roomId is exactly 5 alphanumeric chars
-	const isValidRoomId = (id: string) => /^[a-zA-Z0-9]{5}$/.test(id);
-
-	// Helper to generate a random 5-character alphanumeric room ID
-	const generateRoomId = () => {
-		const chars =
-			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-		let result = "";
-		for (let i = 0; i < 5; i++) {
-			result += chars.charAt(Math.floor(Math.random() * chars.length));
-		}
-		setRoomId(result);
-		setRoomError("");
-	};
-
 	const createRoom = () => {
-		if (!isValidRoomId(roomId)) {
-			setRoomError("Room code must be exactly 5 alphanumeric characters.");
-			return;
-		}
-		setRoomError("");
+		const newRoomId = Math.random().toString(36).substring(2, 12);
 		router.push(
-			`/meeting/${roomId}?email=${encodeURIComponent(
+			`/meeting/${newRoomId}?email=${encodeURIComponent(
 				email
 			)}&password=${encodeURIComponent(password)}`
 		);
@@ -40,11 +20,6 @@ export default function Home() {
 
 	const joinRoom = (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!isValidRoomId(roomId)) {
-			setRoomError("Room code must be exactly 5 alphanumeric characters.");
-			return;
-		}
-		setRoomError("");
 		if (roomId.trim() && email.trim() && password.trim()) {
 			router.push(
 				`/meeting/${roomId}?email=${encodeURIComponent(
@@ -68,34 +43,6 @@ export default function Home() {
 
 				<div className="space-y-6">
 					<div className="space-y-4">
-						<div>
-							<label htmlFor="room-id" className="sr-only">
-								Room ID
-							</label>
-							<div className="flex gap-2">
-								<input
-									type="text"
-									id="room-id"
-									value={roomId}
-									onChange={(e) => {
-										setRoomId(e.target.value);
-										setRoomError("");
-									}}
-									placeholder="Enter 5-char Room Code (e.g. ABC12)"
-									className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-									maxLength={5}
-									required
-								/>
-								<button
-									type="button"
-									onClick={generateRoomId}
-									className="px-3 py-2 bg-gray-200 rounded-md text-gray-700 hover:bg-gray-300 focus:outline-none"
-									title="Generate random room code"
-								>
-									Generate
-								</button>
-							</div>
-						</div>
 						<div>
 							<label htmlFor="email" className="sr-only">
 								Email
@@ -124,15 +71,10 @@ export default function Home() {
 								required
 							/>
 						</div>
-						{roomError && (
-							<div className="text-red-500 text-sm mb-2">{roomError}</div>
-						)}
 						<button
 							onClick={createRoom}
 							className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-							disabled={
-								!isValidRoomId(roomId) || !email.trim() || !password.trim()
-							}
+							disabled={!email.trim() || !password.trim()}
 						>
 							Create New Room
 						</button>
@@ -148,12 +90,51 @@ export default function Home() {
 					</div>
 
 					<form onSubmit={joinRoom} className="space-y-4">
+						<div>
+							<label htmlFor="room-id" className="sr-only">
+								Room ID
+							</label>
+							<input
+								type="text"
+								id="room-id"
+								value={roomId}
+								onChange={(e) => setRoomId(e.target.value)}
+								placeholder="Enter Room ID"
+								className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								required
+							/>
+						</div>
+						<div>
+							<label htmlFor="join-email" className="sr-only">
+								Email
+							</label>
+							<input
+								type="email"
+								id="join-email"
+								value={email}
+								onChange={(e) => setEmail(e.target.value)}
+								placeholder="Enter Email"
+								className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								required
+							/>
+						</div>
+						<div>
+							<label htmlFor="join-password" className="sr-only">
+								Password
+							</label>
+							<input
+								type="password"
+								id="join-password"
+								value={password}
+								onChange={(e) => setPassword(e.target.value)}
+								placeholder="Enter Password"
+								className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								required
+							/>
+						</div>
 						<button
 							type="submit"
 							className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-							disabled={
-								!isValidRoomId(roomId) || !email.trim() || !password.trim()
-							}
 						>
 							Join Room
 						</button>
