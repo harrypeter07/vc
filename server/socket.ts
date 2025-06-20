@@ -252,6 +252,42 @@ export const getIO = () => {
 				}
 			});
 		});
+
+		// --- Test/Mock Interview Events ---
+		socket.on("start-test", (questions, interviewerId) => {
+			const rooms = Array.from(socket.rooms).filter((r) => r !== socket.id);
+			rooms.forEach((roomId) => {
+				socket.to(roomId).emit("start-test", questions, interviewerId);
+			});
+		});
+
+		socket.on("next-question", (nextIndex) => {
+			const rooms = Array.from(socket.rooms).filter((r) => r !== socket.id);
+			rooms.forEach((roomId) => {
+				socket.to(roomId).emit("next-question", nextIndex);
+			});
+		});
+
+		socket.on("submit-answer", (answer) => {
+			const rooms = Array.from(socket.rooms).filter((r) => r !== socket.id);
+			rooms.forEach((roomId) => {
+				socket.to(roomId).emit("candidate-answer", answer);
+			});
+		});
+
+		socket.on("finish-test", (answers) => {
+			const rooms = Array.from(socket.rooms).filter((r) => r !== socket.id);
+			rooms.forEach((roomId) => {
+				socket.to(roomId).emit("finish-test", answers);
+			});
+		});
+
+		socket.on("score-sheet", (result) => {
+			const rooms = Array.from(socket.rooms).filter((r) => r !== socket.id);
+			rooms.forEach((roomId) => {
+				socket.to(roomId).emit("score-sheet", result);
+			});
+		});
 	});
 
 	return io;
